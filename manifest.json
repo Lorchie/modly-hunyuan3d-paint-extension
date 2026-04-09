@@ -1,0 +1,154 @@
+{
+  "id": "hunyuan3d-paint",
+  "name": "Hunyuan3D Paint",
+  "source": "https://github.com/Lorchie/modly-hunyuan3d-paint-extension",
+  "description": "Apply PBR textures to an existing .obj or .glb mesh from a reference image. 100% local inference via Hunyuan3D-Paint (Tencent). Requires ~8 GB VRAM.",
+  "version": "1.0.0",
+  "author": "Lorchie",
+  "generator_class": "Hunyuan3DPaintGenerator",
+  "tags": ["texture", "image-to-texture", "mesh-input", "local", "pbr"],
+  "nodes": [
+    {
+      "id": "paint-turbo",
+      "name": "Hunyuan3D Paint — Turbo",
+      "input": "mesh",
+      "output": "mesh",
+      "hf_repo": "tencent/Hunyuan3D-2",
+      "download_check": "hunyuan3d-paint-v2-0-turbo",
+      "hf_skip_prefixes": [
+        "hunyuan3d-dit-v2-0/**",
+        "hunyuan3d-dit-v2-0-fast/**",
+        "hunyuan3d-dit-v2-0-turbo/**",
+        "hunyuan3d-vae-v2-0/**",
+        "hunyuan3d-vae-v2-0-turbo/**",
+        "hunyuan3d-vae-v2-0-withencoder/**",
+        "hunyuan3d-paint-v2-0/**",
+        "assets/**"
+      ],
+      "description": "Fast PBR texture generation (~40-60s on RTX 4070)",
+      "params_schema": [
+        {
+          "id": "image_path",
+          "label": "Reference Image Path",
+          "type": "string",
+          "default": "",
+          "tooltip": "Absolute path to the reference image (.png / .jpg / .webp). Used to condition the texture generation."
+        },
+        {
+          "id": "texture_resolution",
+          "label": "Texture Resolution",
+          "type": "select",
+          "default": 1024,
+          "options": [
+            { "value": 512,  "label": "512" },
+            { "value": 1024, "label": "1024" },
+            { "value": 2048, "label": "2048" }
+          ],
+          "tooltip": "Resolution of the final texture atlas."
+        },
+        {
+          "id": "num_inference_steps",
+          "label": "Inference Steps",
+          "type": "select",
+          "default": 30,
+          "options": [
+            { "value": 15, "label": "15 — Fast" },
+            { "value": 30, "label": "30 — Balanced" },
+            { "value": 50, "label": "50 — High Quality" }
+          ],
+          "tooltip": "More steps = better quality, slower generation."
+        },
+        {
+          "id": "guidance_scale",
+          "label": "Guidance Scale",
+          "type": "float",
+          "default": 5.5,
+          "min": 1.0,
+          "max": 10.0,
+          "step": 0.5,
+          "tooltip": "Conditioning strength on the reference image. Higher = closer to reference."
+        },
+        {
+          "id": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": -1,
+          "min": -1,
+          "max": 2147483647,
+          "tooltip": "Seed for reproducibility. -1 = random."
+        }
+      ]
+    },
+    {
+      "id": "paint-standard",
+      "name": "Hunyuan3D Paint — Standard",
+      "input": "mesh",
+      "output": "mesh",
+      "hf_repo": "tencent/Hunyuan3D-2",
+      "download_check": "hunyuan3d-paint-v2-0",
+      "hf_skip_prefixes": [
+        "hunyuan3d-dit-v2-0/**",
+        "hunyuan3d-dit-v2-0-fast/**",
+        "hunyuan3d-dit-v2-0-turbo/**",
+        "hunyuan3d-vae-v2-0/**",
+        "hunyuan3d-vae-v2-0-turbo/**",
+        "hunyuan3d-vae-v2-0-withencoder/**",
+        "hunyuan3d-paint-v2-0-turbo/**",
+        "assets/**"
+      ],
+      "description": "Highest quality PBR textures (~90-120s on RTX 4070)",
+      "params_schema": [
+        {
+          "id": "image_path",
+          "label": "Reference Image Path",
+          "type": "string",
+          "default": "",
+          "tooltip": "Absolute path to the reference image (.png / .jpg / .webp). Used to condition the texture generation."
+        },
+        {
+          "id": "texture_resolution",
+          "label": "Texture Resolution",
+          "type": "select",
+          "default": 1024,
+          "options": [
+            { "value": 512,  "label": "512" },
+            { "value": 1024, "label": "1024" },
+            { "value": 2048, "label": "2048" }
+          ],
+          "tooltip": "Resolution of the final texture atlas."
+        },
+        {
+          "id": "num_inference_steps",
+          "label": "Inference Steps",
+          "type": "select",
+          "default": 30,
+          "options": [
+            { "value": 15, "label": "15 — Fast" },
+            { "value": 30, "label": "30 — Balanced" },
+            { "value": 50, "label": "50 — High Quality" }
+          ],
+          "tooltip": "More steps = better quality, slower generation."
+        },
+        {
+          "id": "guidance_scale",
+          "label": "Guidance Scale",
+          "type": "float",
+          "default": 5.5,
+          "min": 1.0,
+          "max": 10.0,
+          "step": 0.5,
+          "tooltip": "Conditioning strength on the reference image. Higher = closer to reference."
+        },
+        {
+          "id": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": -1,
+          "min": -1,
+          "max": 2147483647,
+          "tooltip": "Seed for reproducibility. -1 = random."
+        }
+      ]
+    }
+  ]
+}

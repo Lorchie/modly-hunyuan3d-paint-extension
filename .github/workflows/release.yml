@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate manifest
+        run: python -c "import json, sys; json.load(open('manifest.json')); print('manifest.json OK')"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build extension archive
+        run: |
+          zip -r modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip \
+            manifest.json \
+            generator.py \
+            build_vendor.py \
+            setup.py \
+            README.md \
+            --exclude "*.pyc" \
+            --exclude "__pycache__/*" \
+            --exclude ".git/*"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Hunyuan3D Paint ${{ github.ref_name }}"
+          body: |
+            ## Hunyuan3D Paint ${{ github.ref_name }}
+
+            Apply PBR textures to existing meshes using Hunyuan3D-Paint (Tencent).
+
+            ### Installation
+            1. Download `modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip`
+            2. Import via **Modly → Extensions → Install from file**
+            3. Run `build_vendor.py` with the app's Python to populate `vendor/`
+            4. Compile C++ extensions (see README)
+
+            ### Changes
+            See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
+          files: |
+            modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
