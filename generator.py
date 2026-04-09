@@ -98,10 +98,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         cancel_event: Optional[threading.Event] = None,
     ) -> Path:
         """
-        image_bytes : raw bytes of the input mesh (.glb or .obj).
-                      Format detected automatically from magic bytes.
+        image_bytes : raw bytes of the reference image (.png / .jpg / .webp).
         params      : {
-            "image_path"         : str   - absolute path to reference image
+            "mesh_path"          : str   - absolute or workspace-relative path to .glb / .obj
             "texture_resolution" : int   - 512 / 1024 / 2048
             "num_inference_steps": int   - 15 / 30 / 50
             "guidance_scale"     : float - 1.0-10.0
@@ -120,17 +119,19 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         # 3%: Load mesh
         self._report(progress_cb, 3, "Loading mesh...")
 
-        # Detect format from magic bytes: GLB starts with b'glTF'
-        mesh_suffix = ".glb" if image_bytes[:4] == b"glTF" else ".obj"
+        mesh_path = params.get("mesh_path", "").strip()
+        if not mesh_path:
+            raise ValueError("No mesh provided. Connect a mesh node to the mesh input.")
 
-        tmp_mesh = tempfile.NamedTemporaryFile(suffix=mesh_suffix, delete=False)
-        try:
-            tmp_mesh.write(image_bytes)
-            tmp_mesh.close()
-            loaded = trimesh.load(tmp_mesh.name, force="mesh")
-        finally:
-            os.unlink(tmp_mesh.name)
+        resolved = Path(mesh_path)
+        if not resolved.is_absolute():
+            workspace = Path(os.environ.get("WORKSPACE_DIR", str(Path.home() / ".modly" / "workspace")))
+            resolved = workspace / mesh_path
 
+        if not resolved.exists():
+            raise ValueError(f"Mesh file not found: {resolved}")
+
+        loaded = trimesh.load(str(resolved), force="mesh")
         if isinstance(loaded, trimesh.Scene):
             geometries = list(loaded.geometry.values())
             if not geometries:
@@ -143,21 +144,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
         self._check_cancelled(cancel_event)
 
-        # 10%: Load reference image
-        self._report(progress_cb, 10, "Loading reference image...")
-
-        image_path = params.get("image_path", "").strip()
-        if not image_path:
-            raise ValueError(
-                "No reference image provided. "
-                "Set the 'Reference Image Path' parameter to the absolute path of an image file."
-            )
-        if not os.path.isfile(image_path):
-            raise ValueError(f"Reference image not found: {image_path}")
-
-        with open(image_path, "rb") as fh:
-            ref_bytes = fh.read()
-        image = self._preprocess(ref_bytes)
+        # 10%: Preprocess reference image
+        self._report(progress_cb, 10, "Preprocessing reference image...")
+        image = self._preprocess(image_bytes)
 
         self._check_cancelled(cancel_event)
 

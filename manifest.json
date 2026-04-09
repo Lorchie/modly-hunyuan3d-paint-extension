@@ -11,7 +11,8 @@
     {
       "id": "paint-turbo",
       "name": "Hunyuan3D Paint — Turbo",
-      "input": "mesh",
+      "input": "image",
+      "inputs": ["image", "mesh"],
       "output": "mesh",
       "hf_repo": "tencent/Hunyuan3D-2",
       "download_check": "hunyuan3d-paint-v2-0-turbo",
@@ -27,13 +28,6 @@
       ],
       "description": "Fast PBR texture generation (~40-60s on RTX 4070)",
       "params_schema": [
-        {
-          "id": "image_path",
-          "label": "Reference Image Path",
-          "type": "string",
-          "default": "",
-          "tooltip": "Absolute path to the reference image (.png / .jpg / .webp). Used to condition the texture generation."
-        },
         {
           "id": "texture_resolution",
           "label": "Texture Resolution",
@@ -82,7 +76,8 @@
     {
       "id": "paint-standard",
       "name": "Hunyuan3D Paint — Standard",
-      "input": "mesh",
+      "input": "image",
+      "inputs": ["image", "mesh"],
       "output": "mesh",
       "hf_repo": "tencent/Hunyuan3D-2",
       "download_check": "hunyuan3d-paint-v2-0",
@@ -98,13 +93,6 @@
       ],
       "description": "Highest quality PBR textures (~90-120s on RTX 4070)",
       "params_schema": [
-        {
-          "id": "image_path",
-          "label": "Reference Image Path",
-          "type": "string",
-          "default": "",
-          "tooltip": "Absolute path to the reference image (.png / .jpg / .webp). Used to condition the texture generation."
-        },
         {
           "id": "texture_resolution",
           "label": "Texture Resolution",
