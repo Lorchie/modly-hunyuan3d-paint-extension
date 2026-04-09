@@ -10,15 +10,9 @@ GitHub    : https://github.com/Tencent/Hunyuan3D-2
 hy3dgen source is either loaded from vendor/ (if build_vendor.py was run)
 or downloaded at first load from the Tencent GitHub repository.
 
-The C++ texture-generation extensions must be compiled once before use:
-
-  cd <ext_dir>/vendor/hy3dgen/texgen/custom_rasterizer
-  python setup.py install
-
-  cd <ext_dir>/vendor/hy3dgen/texgen/differentiable_renderer
-  python setup.py install
-
-(Replace <ext_dir>/vendor with <model_dir>/_hy3dgen if vendor/ was not built.)
+The C++ texture-generation extensions (custom_rasterizer, differentiable_renderer)
+are compiled automatically by setup.py at install time. If they are missing,
+click "Repair" on the Models page to re-run setup.py.
 """
 import io
 import os
@@ -188,9 +182,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
             t.start()
 
         tmp_img = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp_img.close()  # close before save — required on Windows
         try:
             image.save(tmp_img.name)
-            tmp_img.close()
             # Hunyuan3DPaintPipeline.__call__(mesh, image) - no extra kwargs.
             # guidance_scale / num_inference_steps are set via config above.
             with torch.no_grad():

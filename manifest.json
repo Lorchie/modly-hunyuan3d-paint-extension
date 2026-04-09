@@ -6,7 +6,7 @@
   "version": "1.0.0",
   "author": "Lorchie",
   "generator_class": "Hunyuan3DPaintGenerator",
-  "tags": ["texture", "image-to-texture", "mesh-input", "local", "pbr"],
+  "tags": ["texture", "image-to-texture", "multi-input", "local", "pbr"],
   "nodes": [
     {
       "id": "paint-turbo",

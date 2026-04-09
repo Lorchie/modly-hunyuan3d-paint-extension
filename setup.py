@@ -1,17 +1,17 @@
 """
 Hunyuan3D-Paint -- extension setup script.
 
-Creates an isolated venv and installs all required dependencies.
+Creates an isolated venv, installs all required dependencies, and compiles
+the C++ hy3dgen extensions (custom_rasterizer + differentiable_renderer)
+automatically for the detected GPU architecture.
+
 Called by Modly at extension install time with:
 
     python setup.py '{"python_exe":"...","ext_dir":"...","gpu_sm":86,"cuda_version":124}'
-
-After setup, the C++ hy3dgen extensions must still be compiled manually.
-Modly will display a build-instructions dialog the first time generate() is
-called if the extensions are missing.
 """
 import io
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -94,6 +94,82 @@ def install_hy3dgen(venv: Path, ext_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# C++ extension compiler
+# ---------------------------------------------------------------------------
+
+def _sm_to_arch(gpu_sm: int) -> str:
+    """Convert SM integer (e.g. 120) to TORCH_CUDA_ARCH_LIST string (e.g. '12.0')."""
+    major = gpu_sm // 10
+    minor = gpu_sm % 10
+    return f"{major}.{minor}"
+
+
+def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
+    """
+    Compile custom_rasterizer and differentiable_renderer for the target GPU.
+    Skips silently if CUDA toolkit or MSVC is missing — generator.py will
+    surface the error on first use.
+    """
+    is_win = platform.system() == "Windows"
+    exe    = venv / ("Scripts/python.exe" if is_win else "bin/python")
+
+    # Resolve texgen directory: prefer vendor/, fall back to site-packages
+    texgen = ext_dir / "vendor" / "hy3dgen" / "texgen"
+    if not texgen.exists():
+        try:
+            site = subprocess.check_output(
+                [str(exe), "-c",
+                 "import site; print([p for p in site.getsitepackages()"
+                 " if 'site-packages' in p][0])"],
+                text=True,
+            ).strip()
+            texgen = Path(site) / "hy3dgen" / "texgen"
+        except Exception as exc:
+            print(f"[setup] Could not locate hy3dgen/texgen: {exc}")
+            return
+
+    if not texgen.exists():
+        print(f"[setup] texgen directory not found at {texgen}, skipping C++ build.")
+        return
+
+    arch      = _sm_to_arch(gpu_sm) if gpu_sm > 0 else "8.6"
+    build_env = {**os.environ, "TORCH_CUDA_ARCH_LIST": arch}
+    if is_win:
+        build_env["DISTUTILS_USE_SDK"] = "1"
+
+    extensions = ["custom_rasterizer", "differentiable_renderer"]
+    for ext_name in extensions:
+        ext_path = texgen / ext_name
+        if not ext_path.exists():
+            print(f"[setup] {ext_name} not found at {ext_path}, skipping.")
+            continue
+
+        # Skip if already compiled (.pyd on Windows, .so on Linux)
+        pattern = "*.pyd" if is_win else "*.so"
+        if any(ext_path.rglob(pattern)):
+            print(f"[setup] {ext_name} already compiled, skipping.")
+            continue
+
+        print(f"[setup] Compiling {ext_name} for sm_{gpu_sm} (arch={arch}) ...")
+        try:
+            subprocess.run(
+                [str(exe), "setup.py", "install"],
+                cwd=str(ext_path),
+                env=build_env,
+                check=True,
+            )
+            print(f"[setup] {ext_name} compiled successfully.")
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"[setup] WARNING: {ext_name} compilation failed (exit {exc.returncode}).\n"
+                f"         The extension will fall back to a slower renderer.\n"
+                f"         Ensure CUDA Toolkit and MSVC Build Tools are installed,\n"
+                f"         then re-run: python setup.py install\n"
+                f"         in: {ext_path}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -149,24 +225,11 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
     # hy3dgen source
     install_hy3dgen(venv, ext_dir)
 
+    # C++ extensions
+    compile_texgen(venv, ext_dir, gpu_sm)
+
     print()
     print("[setup] Done. Venv ready at:", venv)
-    print()
-    print("[setup] IMPORTANT - compile the C++ hy3dgen extensions before first use:")
-    texgen = ext_dir / "vendor" / "hy3dgen" / "texgen"
-    if not texgen.exists():
-        is_win = platform.system() == "Windows"
-        exe    = venv / ("Scripts/python.exe" if is_win else "bin/python")
-        site   = subprocess.check_output(
-            [str(exe), "-c",
-             "import site; print([p for p in site.getsitepackages() if 'site-packages' in p][0])"],
-            text=True,
-        ).strip()
-        texgen = Path(site) / "hy3dgen" / "texgen"
-    print(f"  cd \"{texgen / 'custom_rasterizer'}\"")
-    print(f"  python setup.py install")
-    print(f"  cd \"{texgen / 'differentiable_renderer'}\"")
-    print(f"  python setup.py install")
 
 
 if __name__ == "__main__":
