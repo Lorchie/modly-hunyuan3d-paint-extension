@@ -69,7 +69,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         from hy3dgen.texgen import Hunyuan3DPaintPipeline
 
         subfolder = self.download_check
-        print(f"[Hunyuan3DPaintGenerator] Loading pipeline ({subfolder})…")
+        print(f"[Hunyuan3DPaintGenerator] Loading pipeline ({subfolder})...")
         pipeline = Hunyuan3DPaintPipeline.from_pretrained(
             str(self.model_dir),
             subfolder=subfolder,
@@ -99,13 +99,13 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
     ) -> Path:
         """
         image_bytes : raw bytes of the input mesh (.glb or .obj).
-                      Detected automatically from magic bytes.
+                      Format detected automatically from magic bytes.
         params      : {
-            "image_path"         : str   — absolute path to reference image
-            "texture_resolution" : int   — 512 / 1024 / 2048
-            "num_inference_steps": int   — 15 / 30 / 50
-            "guidance_scale"     : float — 1.0–10.0
-            "seed"               : int   — -1 for random
+            "image_path"         : str   - absolute path to reference image
+            "texture_resolution" : int   - 512 / 1024 / 2048
+            "num_inference_steps": int   - 15 / 30 / 50
+            "guidance_scale"     : float - 1.0-10.0
+            "seed"               : int   - -1 for random
           }
         """
         import torch
@@ -117,8 +117,8 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         if seed == -1:
             seed = random.randint(0, 2 ** 31 - 1)
 
-        # ── 3 %: Load mesh ───────────────────────────────────────────────
-        self._report(progress_cb, 3, "Loading mesh…")
+        # 3%: Load mesh
+        self._report(progress_cb, 3, "Loading mesh...")
 
         # Detect format from magic bytes: GLB starts with b'glTF'
         mesh_suffix = ".glb" if image_bytes[:4] == b"glTF" else ".obj"
@@ -143,8 +143,8 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
         self._check_cancelled(cancel_event)
 
-        # ── 10 %: Load reference image ───────────────────────────────────
-        self._report(progress_cb, 10, "Loading reference image…")
+        # 10%: Load reference image
+        self._report(progress_cb, 10, "Loading reference image...")
 
         image_path = params.get("image_path", "").strip()
         if not image_path:
@@ -161,13 +161,13 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
         self._check_cancelled(cancel_event)
 
-        # ── 20 %: Load model ─────────────────────────────────────────────
-        self._report(progress_cb, 20, "Loading paint model…")
+        # 20%: Load model
+        self._report(progress_cb, 20, "Loading paint model...")
         self.load()
         self._check_cancelled(cancel_event)
 
-        # ── 25 %: Configure renderer ─────────────────────────────────────
-        self._report(progress_cb, 25, "Configuring renderer…")
+        # 25%: Configure renderer
+        self._report(progress_cb, 25, "Configuring renderer...")
 
         res = int(params.get("texture_resolution", 1024))
         self._model.config.render_size  = res
@@ -186,14 +186,14 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
         self._check_cancelled(cancel_event)
 
-        # ── 30→92 %: Generate textures ───────────────────────────────────
-        self._report(progress_cb, 30, "Generating textures…")
+        # 30-92%: Generate textures
+        self._report(progress_cb, 30, "Generating textures...")
 
         stop_evt = threading.Event()
         if progress_cb:
             t = threading.Thread(
                 target=smooth_progress,
-                args=(progress_cb, 30, 92, "Generating textures…", stop_evt),
+                args=(progress_cb, 30, 92, "Generating textures...", stop_evt),
                 daemon=True,
             )
             t.start()
@@ -202,7 +202,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         try:
             image.save(tmp_img.name)
             tmp_img.close()
-            # Hunyuan3DPaintPipeline.__call__(mesh, image) — no extra kwargs.
+            # Hunyuan3DPaintPipeline.__call__(mesh, image) - no extra kwargs.
             # guidance_scale / num_inference_steps are set via config above.
             with torch.no_grad():
                 result = self._model(mesh, image=tmp_img.name)
@@ -213,8 +213,8 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
         self._check_cancelled(cancel_event)
 
-        # ── 95 %: Export GLB ─────────────────────────────────────────────
-        self._report(progress_cb, 95, "Exporting GLB…")
+        # 95%: Export GLB
+        self._report(progress_cb, 95, "Exporting GLB...")
 
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         name = f"{int(time.time())}_{uuid.uuid4().hex[:8]}_textured.glb"
@@ -236,7 +236,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         try:
             return rembg.remove(img).convert("RGBA")
         except Exception:
-            # cuDNN/CUDA incompatibility — fall back to CPU
+            # cuDNN/CUDA incompatibility - fall back to CPU
             session = rembg.new_session("u2net", providers=["CPUExecutionProvider"])
             return rembg.remove(img, session=session).convert("RGBA")
 
@@ -249,7 +249,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
     def _ensure_hy3dgen(self) -> None:
         """
         Ensure hy3dgen is importable.
-        Order: vendor/ → downloaded copy in model_dir/_hy3dgen.
+        Order: vendor/ -> downloaded copy in model_dir/_hy3dgen.
         """
         try:
             import hy3dgen  # noqa: F401
@@ -277,10 +277,10 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         import urllib.request
 
         dest.mkdir(parents=True, exist_ok=True)
-        print("[Hunyuan3DPaintGenerator] Downloading hy3dgen source from GitHub…")
+        print("[Hunyuan3DPaintGenerator] Downloading hy3dgen source from GitHub...")
         with urllib.request.urlopen(_GITHUB_ZIP, timeout=180) as resp:
             data = resp.read()
-        print("[Hunyuan3DPaintGenerator] Extracting hy3dgen…")
+        print("[Hunyuan3DPaintGenerator] Extracting hy3dgen...")
 
         prefix = "Hunyuan3D-2-main/hy3dgen/"
         strip  = "Hunyuan3D-2-main/"
@@ -308,10 +308,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
             from hy3dgen.texgen import Hunyuan3DPaintPipeline  # noqa: F401
             return
         except (ImportError, OSError) as exc:
-            # Determine where hy3dgen lives so we can show the correct build path
-            vendor = _EXTENSION_DIR / "vendor" / "hy3dgen" / "texgen"
+            vendor   = _EXTENSION_DIR / "vendor" / "hy3dgen" / "texgen"
             fallback = self.model_dir / "_hy3dgen" / "hy3dgen" / "texgen"
-            base = vendor if vendor.exists() else fallback
+            base     = vendor if vendor.exists() else fallback
             raise RuntimeError(
                 "C++ extensions for texture generation are not compiled.\n"
                 "Build them once with the app's Python:\n\n"

@@ -1,5 +1,5 @@
 """
-Hunyuan3D-Paint — extension setup script.
+Hunyuan3D-Paint -- extension setup script.
 
 Creates an isolated venv and installs all required dependencies.
 Called by Modly at extension install time with:
@@ -64,14 +64,14 @@ def install_hy3dgen(venv: Path, ext_dir: Path) -> None:
     # Prefer vendor/ if build_vendor.py was already run
     vendor_src = ext_dir / "vendor" / "hy3dgen"
     if vendor_src.exists():
-        print(f"[setup] Copying hy3dgen from vendor/ → {dest}")
+        print(f"[setup] Copying hy3dgen from vendor/ -> {dest}")
         import shutil
         shutil.copytree(str(vendor_src), str(dest))
         print("[setup] hy3dgen copied from vendor/.")
         return
 
     # Fallback: download from GitHub
-    print("[setup] Downloading hy3dgen source from GitHub…")
+    print("[setup] Downloading hy3dgen source from GitHub...")
     with urllib.request.urlopen(_GITHUB_ZIP, timeout=180) as resp:
         data = resp.read()
 
@@ -100,31 +100,31 @@ def install_hy3dgen(venv: Path, ext_dir: Path) -> None:
 def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) -> None:
     venv = ext_dir / "venv"
 
-    print(f"[setup] Creating venv at {venv} …")
+    print(f"[setup] Creating venv at {venv} ...")
     subprocess.run([python_exe, "-m", "venv", str(venv)], check=True)
 
-    # ── PyTorch selection ─────────────────────────────────────────────────
+    # PyTorch selection
     if gpu_sm >= 100 or cuda_version >= 128:
         torch_ver   = "2.7.0"
         torch_index = "https://download.pytorch.org/whl/cu128"
         torch_pkgs  = ["torch==2.7.0", "torchvision==0.22.0"]
-        print(f"[setup] GPU SM {gpu_sm} → PyTorch 2.7 + CUDA 12.8 (Blackwell)")
+        print(f"[setup] GPU SM {gpu_sm} -> PyTorch 2.7 + CUDA 12.8 (Blackwell)")
     elif gpu_sm == 0 or gpu_sm >= 70:
         torch_ver   = "2.6.0"
         torch_index = "https://download.pytorch.org/whl/cu124"
         torch_pkgs  = ["torch==2.6.0", "torchvision==0.21.0"]
-        print(f"[setup] GPU SM {gpu_sm} → PyTorch 2.6 + CUDA 12.4")
+        print(f"[setup] GPU SM {gpu_sm} -> PyTorch 2.6 + CUDA 12.4")
     else:
         torch_ver   = "2.5.1"
         torch_index = "https://download.pytorch.org/whl/cu118"
         torch_pkgs  = ["torch==2.5.1", "torchvision==0.20.1"]
-        print(f"[setup] GPU SM {gpu_sm} (legacy) → PyTorch 2.5 + CUDA 11.8")
+        print(f"[setup] GPU SM {gpu_sm} (legacy) -> PyTorch 2.5 + CUDA 11.8")
 
-    print("[setup] Installing PyTorch …")
+    print("[setup] Installing PyTorch ...")
     pip(venv, "install", *torch_pkgs, "--index-url", torch_index)
 
-    # ── Core runtime dependencies ─────────────────────────────────────────
-    print("[setup] Installing core dependencies …")
+    # Core runtime dependencies
+    print("[setup] Installing core dependencies ...")
     pip(venv, "install",
         "Pillow",
         "numpy",
@@ -139,20 +139,20 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
         "xatlas",
     )
 
-    # ── rembg ─────────────────────────────────────────────────────────────
-    print("[setup] Installing rembg …")
+    # rembg
+    print("[setup] Installing rembg ...")
     if gpu_sm >= 70:
         pip(venv, "install", "rembg[gpu]")
     else:
         pip(venv, "install", "rembg", "onnxruntime")
 
-    # ── hy3dgen source ────────────────────────────────────────────────────
+    # hy3dgen source
     install_hy3dgen(venv, ext_dir)
 
     print()
     print("[setup] Done. Venv ready at:", venv)
     print()
-    print("[setup] IMPORTANT — compile the C++ hy3dgen extensions before first use:")
+    print("[setup] IMPORTANT - compile the C++ hy3dgen extensions before first use:")
     texgen = ext_dir / "vendor" / "hy3dgen" / "texgen"
     if not texgen.exists():
         is_win = platform.system() == "Windows"

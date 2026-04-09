@@ -36,8 +36,8 @@ from pathlib import Path
 VENDOR      = Path(__file__).parent / "vendor"
 GITHUB_ZIP  = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
 
-# Pure-Python packages to vendor (no compilation needed)
-# torch and torchvision are already provided by the host app — do NOT vendor them.
+# Pure-Python packages to vendor (no compilation needed).
+# torch and torchvision are already provided by the host app - do NOT vendor them.
 PURE_PACKAGES = [
     "trimesh",
     "huggingface_hub",
@@ -66,9 +66,9 @@ def vendor_pure_package(package: str, dest: Path) -> None:
 def vendor_hy3dgen(dest: Path) -> None:
     """
     Download Hunyuan3D-2 source from GitHub and extract the hy3dgen/ package
-    into vendor/.  Only the pure-Python portions are extracted; the C++
+    into vendor/. Only the pure-Python portions are extracted; the C++
     extensions (custom_rasterizer, differentiable_renderer) must be compiled
-    separately — see the module docstring above.
+    separately - see the module docstring above.
     """
     import urllib.request
 
@@ -77,7 +77,7 @@ def vendor_hy3dgen(dest: Path) -> None:
         print("  hy3dgen/ already present in vendor/, skipping.")
         return
 
-    print("  Downloading Hunyuan3D-2 source from GitHub…")
+    print("  Downloading Hunyuan3D-2 source from GitHub...")
     with urllib.request.urlopen(GITHUB_ZIP, timeout=180) as resp:
         data = resp.read()
     print(f"  Downloaded {len(data) // 1024 // 1024} MB.")
@@ -85,7 +85,7 @@ def vendor_hy3dgen(dest: Path) -> None:
     prefix = "Hunyuan3D-2-main/hy3dgen/"
     strip  = "Hunyuan3D-2-main/"
 
-    print("  Extracting hy3dgen/ …")
+    print("  Extracting hy3dgen/...")
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         for member in zf.namelist():
             if not member.startswith(prefix):
@@ -100,7 +100,7 @@ def vendor_hy3dgen(dest: Path) -> None:
 
     print(f"  hy3dgen/ extracted to {dest}.")
     print()
-    print("  IMPORTANT — C++ extensions still need manual compilation:")
+    print("  IMPORTANT - C++ extensions still need manual compilation:")
     print(f"    cd \"{dest / 'hy3dgen' / 'texgen' / 'custom_rasterizer'}\"")
     print(f"    python setup.py install")
     print()
@@ -118,11 +118,11 @@ def main() -> None:
 
     # 1. Pure-Python packages
     for pkg in PURE_PACKAGES:
-        print(f"\n[1] Vendoring {pkg}…")
+        print(f"\n[1] Vendoring {pkg}...")
         vendor_pure_package(pkg, VENDOR)
 
     # 2. hy3dgen source
-    print("\n[2] Vendoring hy3dgen source…")
+    print("\n[2] Vendoring hy3dgen source...")
     vendor_hy3dgen(VENDOR)
 
     print("\nDone! vendor/ is ready.")
