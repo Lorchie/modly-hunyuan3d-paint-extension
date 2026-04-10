@@ -9,9 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────
-  # Job 1 — mesh_processor (pybind11 C++, no CUDA required)
-  # ─────────────────────────────────────────────────────────────────────────
   build-mesh-processor:
     name: mesh_processor | ${{ matrix.os }} | py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
@@ -59,7 +56,7 @@ jobs:
       - name: Build wheel
         run: |
           mkdir -p dist
-          pip wheel hy3dgen/texgen/differentiable_renderer --no-cache-dir -w dist/
+          pip wheel hy3dgen/texgen/differentiable_renderer --no-build-isolation --no-cache-dir -w dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -67,26 +64,24 @@ jobs:
           name: mesh-processor-${{ matrix.os }}-py${{ matrix.python }}
           path: dist/*.whl
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Job 2 — custom_rasterizer (CUDA extension, torch-version-tagged wheels)
-  # ─────────────────────────────────────────────────────────────────────────
   build-custom-rasterizer:
     name: custom_rasterizer | ${{ matrix.os }} | py${{ matrix.python }} | ${{ matrix.torch.label }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
         python: ['3.10', '3.11', '3.12']
         torch:
-          - label:  torch260-cuda124
-            pkg:    "torch==2.6.0 torchvision==0.21.0"
-            index:  "https://download.pytorch.org/whl/cu124"
-            cuda:   "12.4.1"
-          - label:  torch270-cuda128
-            pkg:    "torch==2.7.0 torchvision==0.22.0"
-            index:  "https://download.pytorch.org/whl/cu128"
-            cuda:   "12.8.0"
+          - label: torch260-cuda124
+            pkg:   "torch==2.6.0 torchvision==0.21.0"
+            index: "https://download.pytorch.org/whl/cu124"
+            cuda:  "12.4.1"
+          - label: torch270-cuda128
+            pkg:   "torch==2.7.0 torchvision==0.22.0"
+            index: "https://download.pytorch.org/whl/cu128"
+            cuda:  "12.8.0"
 
     steps:
       - uses: actions/checkout@v4
@@ -95,12 +90,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Install CUDA toolkit so nvcc is available for compilation
       - name: Install CUDA ${{ matrix.torch.cuda }}
         uses: Jimver/cuda-toolkit@v0.2.23
         with:
           cuda: ${{ matrix.torch.cuda }}
           method: network
+          sub-packages: '["nvcc", "cudart", "cudart_dev"]'
           linux-local-args: '["--toolkit"]'
 
       - name: Install PyTorch
@@ -137,24 +132,19 @@ jobs:
           mkdir -p raw-dist
           pip wheel hy3dgen/texgen/custom_rasterizer --no-cache-dir -w raw-dist/
 
-      # Rename wheel to include torch+cuda tag in the version field
-      # e.g. custom_rasterizer-0.1-cp311-cp311-win_amd64.whl
-      #   -> custom_rasterizer-0.1.0+torch270.cuda128-cp311-cp311-win_amd64.whl
       - name: Tag wheel with torch+cuda version
         shell: python
         run: |
-          import pathlib, shutil, re, sys
+          import pathlib, shutil, re
           label = "${{ matrix.torch.label }}"
           src   = pathlib.Path("raw-dist")
           dst   = pathlib.Path("dist")
           dst.mkdir(exist_ok=True)
           for whl in src.glob("*.whl"):
-              # Insert +label after the version field (first segment separated by -)
               tagged = re.sub(
                   r'^(custom_rasterizer-[^-]+)(-)',
                   lambda m: f"{m.group(1)}.0+{label}{m.group(2)}",
-                  whl.name,
-                  count=1,
+                  whl.name, count=1,
               )
               shutil.copy(whl, dst / tagged)
               print(f"  {whl.name} -> {tagged}")
@@ -165,9 +155,6 @@ jobs:
           name: custom-rasterizer-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.torch.label }}
           path: dist/*.whl
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Job 3 — Crée la release et attache tous les assets
-  # ─────────────────────────────────────────────────────────────────────────
   create-release:
     name: Create Release with Wheels & Extension
     needs: [build-mesh-processor, build-custom-rasterizer]
@@ -213,26 +200,49 @@ jobs:
           body: |
             ## Hunyuan3D Paint ${{ github.ref_name }}
             Apply PBR textures to existing meshes using Hunyuan3D-Paint (Tencent).
-            
+
             ### 📦 Assets
             - **modly-hunyuan3d-paint-extension** : Extension Modly (Blender plugin)
-            - **Precompiled wheels** : mesh_processor & custom_rasterizer for Python 3.10, 3.11, 3.12
-              - Windows & Linux support
-              - CUDA variants: 12.4.1 (torch 2.6.0) & 12.8.0 (torch 2.7.0)
-            
-            ### 📥 Installation
-            
-            #### Option 1: Use the Modly extension
-            1. Download `modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip`
-            2. Import via **Modly → Extensions → Install from file**
-            3. Run `build_vendor.py` with the app's Python to populate `vendor/`
-            4. Compile C++ extensions (see README)
-            
-            #### Option 2: Use precompiled wheels
-            ```bash
-            pip install modly-hunyuan3d-paint-extension-*.whl
-            ```
-            
+            - **mesh_processor** : Windows & Linux, Python 3.10–3.12
+            - **custom_rasterizer** : Windows & Linux, CUDA 12.4/12.8, Python 3.10–3.12
+
+            ### 📥 Installation rapide
+```bash
+            pip install <wheel>.whl
+```
+
+            ### 🪟 Windows — Build depuis les sources (si le wheel ne fonctionne pas)
+
+            **Prérequis :**
+            - [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) 12.4 ou 12.8 installé
+            - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) avec "Desktop development with C++"
+            - Python 3.10, 3.11 ou 3.12
+
+```bash
+            # 1. Cloner le repo
+            git clone https://github.com/Lorchie/modly-hunyuan3d-paint-extension
+            cd modly-hunyuan3d-paint-extension
+
+            # 2. Installer PyTorch (choisir selon votre CUDA)
+            # CUDA 12.4 :
+            pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+            # CUDA 12.8 :
+            pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+
+            # 3. Dépendances de build
+            pip install ninja pybind11 setuptools wheel
+
+            # 4. Télécharger les sources Hunyuan3D-2
+            python build_vendor.py   # ou manuellement depuis le repo Tencent
+
+            # 5. Builder les wheels
+            pip wheel hy3dgen/texgen/differentiable_renderer --no-build-isolation -w dist/
+            pip wheel hy3dgen/texgen/custom_rasterizer -w dist/
+
+            # 6. Installer
+            pip install dist/*.whl
+```
+
             ### 📝 Changes
             See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
           files: final_assets/*
