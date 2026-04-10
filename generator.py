@@ -284,22 +284,95 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
     def _check_texgen_extensions(self) -> None:
         """
-        Validate that the C++ texture-generation extensions are compiled.
-        Raises RuntimeError with build instructions if they are missing.
+        Ensure C++ texture-generation extensions are compiled.
+        - custom_rasterizer : CUDA rasterizer (requires nvcc)
+        - mesh_processor    : pybind11 C++ module inside differentiable_renderer
+        Compiles automatically if either is missing.
         """
-        try:
-            from hy3dgen.texgen import Hunyuan3DPaintPipeline  # noqa: F401
+        missing = []
+        for module in ("custom_rasterizer", "mesh_processor"):
+            try:
+                __import__(module)
+            except (ImportError, OSError):
+                missing.append(module)
+
+        if not missing:
             return
-        except (ImportError, OSError) as exc:
-            vendor   = _EXTENSION_DIR / "vendor" / "hy3dgen" / "texgen"
-            fallback = self.model_dir / "_hy3dgen" / "hy3dgen" / "texgen"
-            base     = vendor if vendor.exists() else fallback
+
+        print(f"[Hunyuan3DPaintGenerator] Missing C++ modules {missing} — compiling...")
+        self._compile_texgen()
+
+        still_missing = []
+        for module in missing:
+            try:
+                __import__(module)
+            except (ImportError, OSError):
+                still_missing.append(module)
+
+        if still_missing:
             raise RuntimeError(
-                "C++ extensions for texture generation are not compiled.\n"
-                "Build them once with the app's Python:\n\n"
-                f"  cd \"{base / 'custom_rasterizer'}\"\n"
-                f"  python setup.py install\n\n"
-                f"  cd \"{base / 'differentiable_renderer'}\"\n"
-                f"  python setup.py install\n\n"
-                f"Original error: {exc}"
-            ) from exc
+                f"C++ extensions could not be compiled: {still_missing}\n"
+                "Ensure CUDA Toolkit and MSVC Build Tools are installed."
+            )
+
+    def _compile_texgen(self) -> None:
+        """
+        Compile custom_rasterizer (CUDA) and differentiable_renderer (pybind11).
+        Runs inside the current venv (sys.executable).
+        """
+        import subprocess
+
+        exe = sys.executable
+
+        # Locate texgen source: prefer vendor/, fall back to hy3dgen package location
+        texgen = _EXTENSION_DIR / "vendor" / "hy3dgen" / "texgen"
+        if not texgen.exists():
+            try:
+                import hy3dgen
+                texgen = Path(hy3dgen.__file__).parent / "texgen"
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Cannot locate hy3dgen/texgen for compilation: {exc}"
+                ) from exc
+
+        if not texgen.exists():
+            raise RuntimeError(f"texgen directory not found at {texgen}")
+
+        # pybind11 is required to compile differentiable_renderer
+        try:
+            import pybind11  # noqa: F401
+        except ImportError:
+            print("[Hunyuan3DPaintGenerator] Installing pybind11...")
+            subprocess.run([exe, "-m", "pip", "install", "pybind11>=2.6.0"], check=True)
+
+        # differentiable_renderer first (pure C++, no CUDA dependency)
+        # custom_rasterizer second (needs CUDA / nvcc)
+        for ext_name, module_name in (
+            ("differentiable_renderer", "mesh_processor"),
+            ("custom_rasterizer",       "custom_rasterizer"),
+        ):
+            ext_path = texgen / ext_name
+            if not ext_path.exists():
+                print(f"[Hunyuan3DPaintGenerator] {ext_name} source not found at {ext_path}, skipping.")
+                continue
+            # Skip if already importable
+            try:
+                __import__(module_name)
+                print(f"[Hunyuan3DPaintGenerator] {module_name} already compiled, skipping.")
+                continue
+            except (ImportError, OSError):
+                pass
+            print(f"[Hunyuan3DPaintGenerator] Compiling {ext_name} -> {module_name}...")
+            try:
+                subprocess.run(
+                    [exe, "setup.py", "install"],
+                    cwd=str(ext_path),
+                    check=True,
+                )
+                print(f"[Hunyuan3DPaintGenerator] {ext_name} compiled.")
+            except subprocess.CalledProcessError as exc:
+                raise RuntimeError(
+                    f"Compilation of {ext_name} failed (exit {exc.returncode}).\n"
+                    f"Ensure CUDA Toolkit and MSVC Build Tools are installed.\n"
+                    f"Source: {ext_path}"
+                ) from exc

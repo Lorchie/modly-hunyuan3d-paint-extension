@@ -104,11 +104,21 @@ def _sm_to_arch(gpu_sm: int) -> str:
     return f"{major}.{minor}"
 
 
+def _module_importable(venv: Path, module: str) -> bool:
+    """Return True if the module can be imported inside the venv."""
+    is_win = platform.system() == "Windows"
+    exe    = venv / ("Scripts/python.exe" if is_win else "bin/python")
+    result = subprocess.run(
+        [str(exe), "-c", f"import {module}"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
     """
     Compile custom_rasterizer and differentiable_renderer for the target GPU.
-    Skips silently if CUDA toolkit or MSVC is missing — generator.py will
-    surface the error on first use.
+    Raises RuntimeError if compilation fails so the install surfaces the error.
     """
     is_win = platform.system() == "Windows"
     exe    = venv / ("Scripts/python.exe" if is_win else "bin/python")
@@ -137,17 +147,22 @@ def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
     if is_win:
         build_env["DISTUTILS_USE_SDK"] = "1"
 
-    extensions = ["custom_rasterizer", "differentiable_renderer"]
-    for ext_name in extensions:
+    # (ext_dir_name, importable_module_name)
+    # differentiable_renderer compiles `mesh_processor` (pybind11)
+    # custom_rasterizer compiles `custom_rasterizer` package + CUDA kernel
+    extensions = [
+        ("differentiable_renderer", "mesh_processor"),
+        ("custom_rasterizer",       "custom_rasterizer"),
+    ]
+    for ext_name, module_name in extensions:
         ext_path = texgen / ext_name
         if not ext_path.exists():
             print(f"[setup] {ext_name} not found at {ext_path}, skipping.")
             continue
 
-        # Skip if already compiled (.pyd on Windows, .so on Linux)
-        pattern = "*.pyd" if is_win else "*.so"
-        if any(ext_path.rglob(pattern)):
-            print(f"[setup] {ext_name} already compiled, skipping.")
+        # Skip if the compiled module is already importable in the venv
+        if _module_importable(venv, module_name):
+            print(f"[setup] {module_name} already compiled, skipping.")
             continue
 
         print(f"[setup] Compiling {ext_name} for sm_{gpu_sm} (arch={arch}) ...")
@@ -160,13 +175,11 @@ def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
             )
             print(f"[setup] {ext_name} compiled successfully.")
         except subprocess.CalledProcessError as exc:
-            print(
-                f"[setup] WARNING: {ext_name} compilation failed (exit {exc.returncode}).\n"
-                f"         The extension will fall back to a slower renderer.\n"
-                f"         Ensure CUDA Toolkit and MSVC Build Tools are installed,\n"
-                f"         then re-run: python setup.py install\n"
-                f"         in: {ext_path}"
-            )
+            raise RuntimeError(
+                f"{ext_name} compilation failed (exit {exc.returncode}).\n"
+                f"Ensure CUDA Toolkit and MSVC Build Tools are installed.\n"
+                f"Source directory: {ext_path}"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +226,9 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
         "scipy",
         "opencv-python-headless",
         "xatlas",
+        # Required to compile differentiable_renderer (pybind11 C++ extension)
+        "pybind11>=2.6.0",
+        "ninja",
     )
 
     # rembg
