@@ -9,7 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  # Compile les wheels (mesh_processor + custom_rasterizer)
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1 — mesh_processor (pybind11 C++, no CUDA required)
+  # ─────────────────────────────────────────────────────────────────────────
   build-mesh-processor:
     name: mesh_processor | ${{ matrix.os }} | py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
@@ -21,11 +23,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+
       - name: Install build dependencies
-        run: pip install "pybind11>=2.6.0" setuptools wheel
+        run: |
+          pip install --upgrade pip setuptools wheel ninja
+          pip install "pybind11>=2.6.0"
+
       - name: Extract differentiable_renderer source
         shell: python
         run: |
@@ -48,14 +55,21 @@ jobs:
                       rel.parent.mkdir(parents=True, exist_ok=True)
                       rel.write_bytes(zf.read(m))
           print("Done.")
+
       - name: Build wheel
-        run: pip wheel hy3dgen/texgen/differentiable_renderer --no-deps -w dist/
+        run: |
+          mkdir -p dist
+          pip wheel hy3dgen/texgen/differentiable_renderer --no-cache-dir -w dist/
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mesh-processor-${{ matrix.os }}-py${{ matrix.python }}
           path: dist/*.whl
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2 — custom_rasterizer (CUDA extension, torch-version-tagged wheels)
+  # ─────────────────────────────────────────────────────────────────────────
   build-custom-rasterizer:
     name: custom_rasterizer | ${{ matrix.os }} | py${{ matrix.python }} | ${{ matrix.torch.label }}
     runs-on: ${{ matrix.os }}
@@ -76,19 +90,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+
+      # Install CUDA toolkit so nvcc is available for compilation
       - name: Install CUDA ${{ matrix.torch.cuda }}
         uses: Jimver/cuda-toolkit@v0.2.23
         with:
           cuda: ${{ matrix.torch.cuda }}
           method: network
           linux-local-args: '["--toolkit"]'
+
       - name: Install PyTorch
         run: pip install ${{ matrix.torch.pkg }} --index-url ${{ matrix.torch.index }}
+
       - name: Install build dependencies
-        run: pip install setuptools wheel ninja
+        run: pip install --upgrade pip setuptools wheel ninja
+
       - name: Extract custom_rasterizer source
         shell: python
         run: |
@@ -111,8 +131,15 @@ jobs:
                       rel.parent.mkdir(parents=True, exist_ok=True)
                       rel.write_bytes(zf.read(m))
           print("Done.")
+
       - name: Build wheel
-        run: pip wheel hy3dgen/texgen/custom_rasterizer --no-deps -w raw-dist/
+        run: |
+          mkdir -p raw-dist
+          pip wheel hy3dgen/texgen/custom_rasterizer --no-cache-dir -w raw-dist/
+
+      # Rename wheel to include torch+cuda tag in the version field
+      # e.g. custom_rasterizer-0.1-cp311-cp311-win_amd64.whl
+      #   -> custom_rasterizer-0.1.0+torch270.cuda128-cp311-cp311-win_amd64.whl
       - name: Tag wheel with torch+cuda version
         shell: python
         run: |
@@ -122,6 +149,7 @@ jobs:
           dst   = pathlib.Path("dist")
           dst.mkdir(exist_ok=True)
           for whl in src.glob("*.whl"):
+              # Insert +label after the version field (first segment separated by -)
               tagged = re.sub(
                   r'^(custom_rasterizer-[^-]+)(-)',
                   lambda m: f"{m.group(1)}.0+{label}{m.group(2)}",
@@ -130,15 +158,18 @@ jobs:
               )
               shutil.copy(whl, dst / tagged)
               print(f"  {whl.name} -> {tagged}")
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: custom-rasterizer-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.torch.label }}
           path: dist/*.whl
 
-  # Crée la release ET attache les wheels d'un coup
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3 — Crée la release et attache tous les assets
+  # ─────────────────────────────────────────────────────────────────────────
   create-release:
-    name: Create Release with Wheels
+    name: Create Release with Wheels & Extension
     needs: [build-mesh-processor, build-custom-rasterizer]
     runs-on: ubuntu-latest
 
@@ -167,7 +198,15 @@ jobs:
             --exclude "__pycache__/*" \
             --exclude ".git/*"
 
-      - name: Create Release with all assets
+      - name: Organize wheels
+        run: |
+          mkdir -p final_assets
+          cp modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip final_assets/
+          cp wheels_tmp/*.whl final_assets/ 2>/dev/null || true
+          echo "=== Final assets ==="
+          ls -lh final_assets/
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Hunyuan3D Paint ${{ github.ref_name }}"
@@ -175,20 +214,27 @@ jobs:
             ## Hunyuan3D Paint ${{ github.ref_name }}
             Apply PBR textures to existing meshes using Hunyuan3D-Paint (Tencent).
             
-            ### Assets
+            ### 📦 Assets
             - **modly-hunyuan3d-paint-extension** : Extension Modly (Blender plugin)
-            - **Wheels** : Precompiled Python wheels for mesh_processor & custom_rasterizer
+            - **Precompiled wheels** : mesh_processor & custom_rasterizer for Python 3.10, 3.11, 3.12
+              - Windows & Linux support
+              - CUDA variants: 12.4.1 (torch 2.6.0) & 12.8.0 (torch 2.7.0)
             
-            ### Installation
+            ### 📥 Installation
+            
+            #### Option 1: Use the Modly extension
             1. Download `modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip`
             2. Import via **Modly → Extensions → Install from file**
             3. Run `build_vendor.py` with the app's Python to populate `vendor/`
-            4. Or use the precompiled wheels directly in your environment
+            4. Compile C++ extensions (see README)
             
-            ### Changes
+            #### Option 2: Use precompiled wheels
+            ```bash
+            pip install modly-hunyuan3d-paint-extension-*.whl
+            ```
+            
+            ### 📝 Changes
             See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
-          files: |
-            modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip
-            wheels_tmp/*.whl
+          files: final_assets/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
