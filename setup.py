@@ -166,20 +166,23 @@ def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
             continue
 
         print(f"[setup] Compiling {ext_name} for sm_{gpu_sm} (arch={arch}) ...")
-        try:
-            subprocess.run(
-                [str(exe), "setup.py", "install"],
-                cwd=str(ext_path),
-                env=build_env,
-                check=True,
-            )
-            print(f"[setup] {ext_name} compiled successfully.")
-        except subprocess.CalledProcessError as exc:
+        result = subprocess.run(
+            [str(exe), "setup.py", "install"],
+            cwd=str(ext_path),
+            env=build_env,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
             raise RuntimeError(
-                f"{ext_name} compilation failed (exit {exc.returncode}).\n"
+                f"{ext_name} compilation failed (exit {result.returncode}).\n"
                 f"Ensure CUDA Toolkit and MSVC Build Tools are installed.\n"
-                f"Source directory: {ext_path}"
-            ) from exc
+                f"Source directory: {ext_path}\n"
+                f"--- stderr ---\n{result.stderr}"
+            )
+        print(f"[setup] {ext_name} compiled successfully.")
 
 
 # ---------------------------------------------------------------------------
