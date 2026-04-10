@@ -7,12 +7,8 @@ image. 100% local inference via Hunyuan3D-Paint (Tencent).
 Reference : https://huggingface.co/tencent/Hunyuan3D-2
 GitHub    : https://github.com/Tencent/Hunyuan3D-2
 
-hy3dgen source is either loaded from vendor/ (if build_vendor.py was run)
-or downloaded at first load from the Tencent GitHub repository.
-
-The C++ texture-generation extensions (custom_rasterizer, differentiable_renderer)
-are compiled automatically by setup.py at install time. If they are missing,
-click "Repair" on the Models page to re-run setup.py.
+C++ extensions (custom_rasterizer, mesh_processor) are installed as
+prebuilt wheels by setup.py at install time. No local compilation required.
 """
 import io
 import os
@@ -31,7 +27,7 @@ from PIL import Image
 from services.generators.base import BaseGenerator, smooth_progress, GenerationCancelled
 
 _EXTENSION_DIR = Path(__file__).parent
-_GITHUB_ZIP    = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
+_GITHUB_ZIP    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
 
 
 class Hunyuan3DPaintGenerator(BaseGenerator):
@@ -158,12 +154,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         from hy3dgen.texgen.differentiable_renderer.mesh_render import MeshRender
         self._model.render = MeshRender(default_resolution=res, texture_size=res)
 
-        # Best-effort: expose num_inference_steps / guidance_scale on config
-        # so that a future hy3dgen version can pick them up without a code change.
         self._model.config.num_inference_steps = num_steps
         self._model.config.guidance_scale      = guidance_scale
 
-        # Seed global RNG (affects diffusion sampling inside HunyuanPaintPipeline)
         torch.manual_seed(seed)
         random.seed(seed)
 
@@ -185,8 +178,6 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         tmp_img.close()  # close before save — required on Windows
         try:
             image.save(tmp_img.name)
-            # Hunyuan3DPaintPipeline.__call__(mesh, image) - no extra kwargs.
-            # guidance_scale / num_inference_steps are set via config above.
             with torch.no_grad():
                 result = self._model(mesh, image=tmp_img.name)
             textured = result[0] if isinstance(result, (list, tuple)) else result
@@ -219,7 +210,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         try:
             return rembg.remove(img).convert("RGBA")
         except Exception:
-            # cuDNN/CUDA incompatibility - fall back to CPU
+            # cuDNN/CUDA incompatibility — fall back to CPU session
             session = rembg.new_session("u2net", providers=["CPUExecutionProvider"])
             return rembg.remove(img, session=session).convert("RGBA")
 
@@ -232,7 +223,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
     def _ensure_hy3dgen(self) -> None:
         """
         Ensure hy3dgen is importable.
-        Order: vendor/ -> downloaded copy in model_dir/_hy3dgen.
+        Order: site-packages (installed by setup.py) -> vendor/ -> model_dir/_hy3dgen.
         """
         try:
             import hy3dgen  # noqa: F401
@@ -252,7 +243,7 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         except ImportError as exc:
             raise RuntimeError(
                 f"hy3dgen still not importable after extraction to {src_dir}.\n"
-                f"Check the folder contents.\nOriginal error: {exc}"
+                f"Original error: {exc}"
             ) from exc
 
     def _download_hy3dgen(self, dest: Path) -> None:
@@ -261,13 +252,12 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
         dest.mkdir(parents=True, exist_ok=True)
         print("[Hunyuan3DPaintGenerator] Downloading hy3dgen source from GitHub...")
-        with urllib.request.urlopen(_GITHUB_ZIP, timeout=180) as resp:
+        with urllib.request.urlopen(_GITHUB_ZIP, timeout=300) as resp:
             data = resp.read()
         print("[Hunyuan3DPaintGenerator] Extracting hy3dgen...")
 
         prefix = "Hunyuan3D-2-main/hy3dgen/"
         strip  = "Hunyuan3D-2-main/"
-
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             for member in zf.namelist():
                 if not member.startswith(prefix):
@@ -284,10 +274,12 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
 
     def _check_texgen_extensions(self) -> None:
         """
-        Ensure C++ texture-generation extensions are compiled.
-        - custom_rasterizer : CUDA rasterizer (requires nvcc)
-        - mesh_processor    : pybind11 C++ module inside differentiable_renderer
-        Compiles automatically if either is missing.
+        Verify that prebuilt C++ extension wheels are installed.
+        - custom_rasterizer : CUDA rasterizer
+        - mesh_processor    : pybind11 differentiable renderer
+
+        These are installed by setup.py from prebuilt wheels — no local
+        compilation. If missing, the extension must be reinstalled.
         """
         missing = []
         for module in ("custom_rasterizer", "mesh_processor"):
@@ -299,142 +291,13 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         if not missing:
             return
 
-        print(f"[Hunyuan3DPaintGenerator] Missing C++ modules {missing} — compiling...")
-        self._compile_texgen()
-
-        still_missing = []
-        for module in missing:
-            try:
-                __import__(module)
-            except (ImportError, OSError):
-                still_missing.append(module)
-
-        if still_missing:
-            raise RuntimeError(
-                f"C++ extensions could not be compiled: {still_missing}\n"
-                "Ensure CUDA Toolkit and MSVC Build Tools are installed."
-            )
-
-    def _compile_texgen(self) -> None:
-        """
-        Compile custom_rasterizer (CUDA) and differentiable_renderer (pybind11).
-        Runs inside the current venv (sys.executable).
-        Activates MSVC automatically on Windows via vcvarsall.bat.
-        """
-        import shutil
-        import subprocess
-
-        exe = sys.executable
-
-        # Locate texgen source: prefer vendor/, fall back to hy3dgen package location
-        texgen = _EXTENSION_DIR / "vendor" / "hy3dgen" / "texgen"
-        if not texgen.exists():
-            try:
-                import hy3dgen
-                texgen = Path(hy3dgen.__file__).parent / "texgen"
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Cannot locate hy3dgen/texgen for compilation: {exc}"
-                ) from exc
-
-        if not texgen.exists():
-            raise RuntimeError(f"texgen directory not found at {texgen}")
-
-        # pybind11 is required to compile differentiable_renderer
-        try:
-            import pybind11  # noqa: F401
-        except ImportError:
-            print("[Hunyuan3DPaintGenerator] Installing pybind11...")
-            subprocess.run([exe, "-m", "pip", "install", "pybind11>=2.6.0"], check=True)
-
-        # Build environment: activate MSVC on Windows so cl.exe is available
-        build_env = self._msvc_env()
-
-        # differentiable_renderer first (pure C++, no CUDA dependency)
-        # custom_rasterizer second (needs CUDA / nvcc)
-        for ext_name, module_name in (
-            ("differentiable_renderer", "mesh_processor"),
-            ("custom_rasterizer",       "custom_rasterizer"),
-        ):
-            ext_path = texgen / ext_name
-            if not ext_path.exists():
-                print(f"[Hunyuan3DPaintGenerator] {ext_name} source not found at {ext_path}, skipping.")
-                continue
-            # Skip if already importable
-            try:
-                __import__(module_name)
-                print(f"[Hunyuan3DPaintGenerator] {module_name} already compiled, skipping.")
-                continue
-            except (ImportError, OSError):
-                pass
-            print(f"[Hunyuan3DPaintGenerator] Compiling {ext_name} -> {module_name}...")
-            result = subprocess.run(
-                [exe, "setup.py", "install"],
-                cwd=str(ext_path),
-                env=build_env,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"Compilation of {ext_name} failed (exit {result.returncode}).\n"
-                    f"Ensure CUDA Toolkit and MSVC Build Tools are installed.\n"
-                    f"Source: {ext_path}\n"
-                    f"--- stderr ---\n{result.stderr}"
-                )
-            print(f"[Hunyuan3DPaintGenerator] {ext_name} compiled.")
-
-    @staticmethod
-    def _msvc_env(arch: str = "x64") -> dict:
-        """
-        Return env dict with MSVC activated via vcvarsall.bat (Windows only).
-        Falls back to os.environ if MSVC is already active or not found.
-        """
-        import shutil
-        import subprocess
-
-        if sys.platform != "win32":
-            return os.environ.copy()
-
-        if shutil.which("cl.exe"):
-            return os.environ.copy()
-
-        prog86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        vswhere = Path(prog86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
-        if not vswhere.exists():
-            print("[Hunyuan3DPaintGenerator] WARNING: vswhere.exe not found.")
-            return os.environ.copy()
-
-        try:
-            install_path = subprocess.check_output(
-                [str(vswhere), "-latest", "-products", "*",
-                 "-requires", "Microsoft.VisualCpp.Tools.HostX64.TargetX64",
-                 "-property", "installationPath"],
-                text=True, stderr=subprocess.DEVNULL,
-            ).strip()
-        except Exception:
-            return os.environ.copy()
-
-        if not install_path:
-            print("[Hunyuan3DPaintGenerator] WARNING: No VS installation with C++ tools found.")
-            return os.environ.copy()
-
-        vcvarsall = Path(install_path) / "VC" / "Auxiliary" / "Build" / "vcvarsall.bat"
-        if not vcvarsall.exists():
-            return os.environ.copy()
-
-        try:
-            out = subprocess.check_output(
-                f'"{vcvarsall}" {arch} && set',
-                shell=True, text=True, stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            return os.environ.copy()
-
-        env = {}
-        for line in out.splitlines():
-            if "=" in line:
-                k, _, v = line.partition("=")
-                env[k] = v
-        print(f"[Hunyuan3DPaintGenerator] MSVC activated ({arch})")
-        return env
+        raise RuntimeError(
+            f"Missing C++ modules: {missing}\n\n"
+            "These wheels are installed automatically during extension setup.\n"
+            "To fix:\n"
+            "  1. Go to Extensions -> Repair (or reinstall the extension)\n"
+            "  2. If no wheel exists for your config, trigger the\n"
+            "     'Build Wheels' workflow at:\n"
+            "     https://github.com/Lorchie/modly-hunyuan3d-paint-extension/actions\n"
+            "  3. Reinstall after the workflow completes."
+        )

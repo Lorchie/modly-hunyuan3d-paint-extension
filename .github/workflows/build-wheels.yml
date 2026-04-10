@@ -1,0 +1,220 @@
+name: Build Wheels
+
+# Builds precompiled C++ extension wheels and publishes them.
+# Triggered manually or on release.
+#
+# Produces:
+#   mesh_processor-0.0.0-{py}-{py}-{plat}.whl
+#   custom_rasterizer-0.1.0+torch{ver}.{cu}-{py}-{py}-{plat}.whl
+#
+# Matrix:
+#   OS      : windows-latest, ubuntu-latest
+#   Python  : 3.10, 3.11, 3.12
+#   CUDA    : cu118 (torch 2.5.1), cu124 (torch 2.6.0), cu128 (torch 2.7.0)
+#   (mesh_processor has no CUDA dependency — built once per OS × Python)
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+# ---------------------------------------------------------------------------
+# Job 1 — mesh_processor (differentiable_renderer, pybind11, no CUDA)
+# ---------------------------------------------------------------------------
+jobs:
+  build-mesh-processor:
+    name: mesh_processor | ${{ matrix.os }} | py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install build deps
+        run: pip install "pybind11>=2.6.0" setuptools wheel
+
+      - name: Extract differentiable_renderer source
+        shell: python
+        run: |
+          import urllib.request, zipfile, io, pathlib
+          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/differentiable_renderer/"
+          STRIP  = "Hunyuan3D-2-main/"
+          print(f"Downloading {URL} ...")
+          with urllib.request.urlopen(URL, timeout=300) as r:
+              data = r.read()
+          with zipfile.ZipFile(io.BytesIO(data)) as zf:
+              for m in zf.namelist():
+                  if not m.startswith(PREFIX):
+                      continue
+                  rel = pathlib.Path(m[len(STRIP):])
+                  if m.endswith("/"):
+                      rel.mkdir(parents=True, exist_ok=True)
+                  else:
+                      rel.parent.mkdir(parents=True, exist_ok=True)
+                      rel.write_bytes(zf.read(m))
+          print("Extracted.")
+
+      - name: Build wheel
+        run: pip wheel hy3dgen/texgen/differentiable_renderer --no-deps -w dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mesh-processor-${{ matrix.os }}-py${{ matrix.python }}
+          path: dist/*.whl
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — custom_rasterizer (CUDA + PyTorch)
+  # ---------------------------------------------------------------------------
+  build-custom-rasterizer:
+    name: custom_rasterizer | ${{ matrix.os }} | py${{ matrix.python }} | ${{ matrix.cuda.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ['3.10', '3.11', '3.12']
+        cuda:
+          - label:     cu118
+            toolkit:   "11.8.0"
+            torch_pkg: "torch==2.5.1 torchvision==0.20.1"
+            torch_idx: "https://download.pytorch.org/whl/cu118"
+            torch_ver: "2.5.1"
+          - label:     cu124
+            toolkit:   "12.4.1"
+            torch_pkg: "torch==2.6.0 torchvision==0.21.0"
+            torch_idx: "https://download.pytorch.org/whl/cu124"
+            torch_ver: "2.6.0"
+          - label:     cu128
+            toolkit:   "12.8.0"
+            torch_pkg: "torch==2.7.0 torchvision==0.22.0"
+            torch_idx: "https://download.pytorch.org/whl/cu128"
+            torch_ver: "2.7.0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install CUDA ${{ matrix.cuda.toolkit }}
+        uses: Jimver/cuda-toolkit@v0.2.23
+        with:
+          cuda: ${{ matrix.cuda.toolkit }}
+          method: network
+          linux-local-args: '["--toolkit"]'
+
+      - name: Install PyTorch (${{ matrix.cuda.label }})
+        run: pip install ${{ matrix.cuda.torch_pkg }} --index-url ${{ matrix.cuda.torch_idx }}
+
+      - name: Install build deps
+        run: pip install setuptools wheel ninja
+
+      - name: Extract custom_rasterizer source
+        shell: python
+        run: |
+          import urllib.request, zipfile, io, pathlib
+          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/custom_rasterizer/"
+          STRIP  = "Hunyuan3D-2-main/"
+          print(f"Downloading {URL} ...")
+          with urllib.request.urlopen(URL, timeout=300) as r:
+              data = r.read()
+          with zipfile.ZipFile(io.BytesIO(data)) as zf:
+              for m in zf.namelist():
+                  if not m.startswith(PREFIX):
+                      continue
+                  rel = pathlib.Path(m[len(STRIP):])
+                  if m.endswith("/"):
+                      rel.mkdir(parents=True, exist_ok=True)
+                  else:
+                      rel.parent.mkdir(parents=True, exist_ok=True)
+                      rel.write_bytes(zf.read(m))
+          print("Extracted.")
+
+      - name: Build wheel
+        run: pip wheel hy3dgen/texgen/custom_rasterizer --no-deps -w raw-dist/
+
+      # Rename: custom_rasterizer-0.1-cp311-... -> custom_rasterizer-0.1.0+torch270.cu128-cp311-...
+      - name: Tag wheel with torch+cuda version
+        shell: python
+        run: |
+          import pathlib, shutil, re
+          label     = "torch${{ matrix.cuda.torch_ver }}.${{ matrix.cuda.label }}".replace(".", "")
+          # rebuild label: torch270.cu128 (dots removed from version, keep cu tag)
+          torch_ver = "${{ matrix.cuda.torch_ver }}".replace(".", "")
+          cu_tag    = "${{ matrix.cuda.label }}"
+          label     = f"torch{torch_ver}.{cu_tag}"
+          src = pathlib.Path("raw-dist")
+          dst = pathlib.Path("dist")
+          dst.mkdir(exist_ok=True)
+          for whl in src.glob("*.whl"):
+              tagged = re.sub(
+                  r"^(custom_rasterizer-[^-]+)(-)",
+                  lambda m: f"{m.group(1)}.0+{label}{m.group(2)}",
+                  whl.name,
+                  count=1,
+              )
+              shutil.copy(whl, dst / tagged)
+              print(f"  {whl.name} -> {tagged}")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-rasterizer-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.cuda.label }}
+          path: dist/*.whl
+
+  # ---------------------------------------------------------------------------
+  # Job 3 — Collect, commit to wheels/, attach to release
+  # ---------------------------------------------------------------------------
+  publish-wheels:
+    name: Publish wheels
+    needs: [build-mesh-processor, build-custom-rasterizer]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+          merge-multiple: true
+
+      - name: Collect into wheels/
+        run: |
+          mkdir -p wheels
+          find _artifacts -name '*.whl' -exec cp {} wheels/ \;
+          echo "=== Wheels ==="
+          ls -1 wheels/
+
+      - name: Commit wheels to repository
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add wheels/
+          if git diff --staged --quiet; then
+            echo "No wheel changes."
+          else
+            git commit -m "ci: update prebuilt wheels [skip ci]"
+            git push
+          fi
+
+      - name: Attach wheels to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wheels/*.whl
