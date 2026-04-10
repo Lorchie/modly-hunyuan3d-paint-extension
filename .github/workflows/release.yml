@@ -207,9 +207,13 @@ jobs:
             - **custom_rasterizer** : Windows & Linux, CUDA 12.4/12.8, Python 3.10–3.12
 
             ### 📥 Installation rapide
+<<<<<<< HEAD
 ```bash
             pip install <wheel>.whl
 ```
+=======
+            pip install <wheel>.whl
+>>>>>>> 7debfd4833abc82f2c8f0580a58eac92e1e7cf89
 
             ### 🪟 Windows — Build depuis les sources (si le wheel ne fonctionne pas)
 
@@ -218,7 +222,10 @@ jobs:
             - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) avec "Desktop development with C++"
             - Python 3.10, 3.11 ou 3.12
 
+<<<<<<< HEAD
 ```bash
+=======
+>>>>>>> 7debfd4833abc82f2c8f0580a58eac92e1e7cf89
             # 1. Cloner le repo
             git clone https://github.com/Lorchie/modly-hunyuan3d-paint-extension
             cd modly-hunyuan3d-paint-extension
@@ -241,7 +248,10 @@ jobs:
 
             # 6. Installer
             pip install dist/*.whl
+<<<<<<< HEAD
 ```
+=======
+>>>>>>> 7debfd4833abc82f2c8f0580a58eac92e1e7cf89
 
             ### 📝 Changes
             See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
