@@ -66,8 +66,23 @@ jobs:
                       rel.write_bytes(zf.read(m))
           print("Extracted.")
 
+      - name: Patch setup.py for Windows (disable manifest embedding)
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import pathlib
+          p = pathlib.Path("hy3dgen/texgen/differentiable_renderer/setup.py")
+          txt = p.read_text(encoding="utf-8")
+          old = "        link_args = []\n        extra_includes = []"
+          new = "        link_args = ['/MANIFEST:NO']  # avoid LNK1158\n        extra_includes = []"
+          if old in txt:
+              p.write_text(txt.replace(old, new), encoding="utf-8")
+              print("Patched.")
+          else:
+              print("Pattern not found — skipping patch.")
+
       - name: Build wheel
-        run: pip wheel hy3dgen/texgen/differentiable_renderer --no-deps -w dist/
+        run: pip wheel hy3dgen/texgen/differentiable_renderer --no-deps --no-build-isolation -w dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -145,15 +160,16 @@ jobs:
           print("Extracted.")
 
       - name: Build wheel
-        run: pip wheel hy3dgen/texgen/custom_rasterizer --no-deps -w raw-dist/
+        env:
+          DISTUTILS_USE_SDK: "1"
+          MSSdk: "1"
+        run: pip wheel hy3dgen/texgen/custom_rasterizer --no-deps --no-build-isolation -w raw-dist/
 
       # Rename: custom_rasterizer-0.1-cp311-... -> custom_rasterizer-0.1.0+torch270.cu128-cp311-...
       - name: Tag wheel with torch+cuda version
         shell: python
         run: |
           import pathlib, shutil, re
-          label     = "torch${{ matrix.cuda.torch_ver }}.${{ matrix.cuda.label }}".replace(".", "")
-          # rebuild label: torch270.cu128 (dots removed from version, keep cu tag)
           torch_ver = "${{ matrix.cuda.torch_ver }}".replace(".", "")
           cu_tag    = "${{ matrix.cuda.label }}"
           label     = f"torch{torch_ver}.{cu_tag}"
