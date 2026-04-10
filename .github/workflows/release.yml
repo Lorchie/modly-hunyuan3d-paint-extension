@@ -238,7 +238,6 @@ jobs:
 
             # 6. Installer
             pip install dist/*.whl
-```
 
             ### 📝 Changes
             See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
