@@ -19,7 +19,22 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-_GITHUB_ZIP = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
+_GITHUB_ZIP   = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
+# Prebuilt wheels hosted in this repo's wheels/ directory (raw GitHub URLs).
+# Format: {module: [(label, url_template), ...]}
+# {pyver} is replaced with e.g. "311", {platform} with "win_amd64" or "linux_x86_64".
+_WHEELS_BASE  = "https://raw.githubusercontent.com/Lorchie/modly-hunyuan3d-paint-extension/main/wheels"
+_WHEEL_SPECS  = {
+    # pybind11 C++, no CUDA — one wheel per Python version / platform
+    "mesh_processor": [
+        ("mesh_inpaint_processor-0.0.0-cp{pyver}-cp{pyver}-{platform}.whl", None),
+    ],
+    # CUDA extension — prefer the torch+cuda-tagged wheel, fall back to generic
+    "custom_rasterizer": [
+        ("custom_rasterizer-0.1.0+{torch_label}-cp{pyver}-cp{pyver}-{platform}.whl", "{torch_label}"),
+        ("custom_rasterizer-0.1-cp{pyver}-cp{pyver}-{platform}.whl", None),
+    ],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +109,66 @@ def install_hy3dgen(venv: Path, ext_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Prebuilt wheel installer
+# ---------------------------------------------------------------------------
+
+def _wheel_platform() -> str:
+    """Return the platform tag used in wheel filenames."""
+    if platform.system() == "Windows":
+        return "win_amd64"
+    machine = platform.machine().lower()
+    return f"linux_{machine}" if machine == "x86_64" else f"linux_{machine}"
+
+
+def _torch_label(torch_ver: str, cuda_ver: int) -> str:
+    """e.g. torch_ver='2.7.0', cuda_ver=128 -> 'torch270.cuda128'"""
+    v = torch_ver.replace(".", "")
+    return f"torch{v}.cuda{cuda_ver}"
+
+
+def _try_install_prebuilt(venv: Path, module: str, pyver: str,
+                           plat: str, torch_label: str) -> bool:
+    """
+    Attempt to install a prebuilt wheel for `module` from the wheels/ directory.
+    Returns True if successfully installed, False otherwise.
+    """
+    is_win = platform.system() == "Windows"
+    pip_exe = venv / ("Scripts/pip.exe" if is_win else "bin/pip")
+    specs = _WHEEL_SPECS.get(module, [])
+
+    for template, needs_label in specs:
+        if needs_label and not torch_label:
+            continue
+        filename = template.format(
+            pyver=pyver,
+            platform=plat,
+            torch_label=torch_label,
+        )
+        url = f"{_WHEELS_BASE}/{filename}"
+        print(f"[setup] Trying prebuilt wheel: {filename} ...")
+        try:
+            # HEAD request to check existence before downloading
+            req = urllib.request.Request(url, method="HEAD")
+            urllib.request.urlopen(req, timeout=10)
+        except Exception:
+            print(f"[setup]   Not found, skipping.")
+            continue
+
+        try:
+            subprocess.run(
+                [str(pip_exe), "install", url],
+                check=True,
+            )
+            print(f"[setup] Installed prebuilt wheel: {filename}")
+            return True
+        except subprocess.CalledProcessError as exc:
+            print(f"[setup]   Install failed (exit {exc.returncode}), will compile from source.")
+            return False
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # C++ extension compiler
 # ---------------------------------------------------------------------------
 
@@ -113,6 +188,73 @@ def _module_importable(venv: Path, module: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def _msvc_env(arch: str = "x64") -> dict:
+    """
+    Return an environment dict with MSVC build tools activated.
+    Finds Visual Studio via vswhere.exe and runs vcvarsall.bat.
+    Returns os.environ.copy() unchanged if MSVC is already active or not found.
+    """
+    import shutil
+
+    if platform.system() != "Windows":
+        return os.environ.copy()
+
+    # Already active if cl.exe is on PATH
+    if shutil.which("cl.exe"):
+        print("[setup] MSVC already active on PATH.")
+        return os.environ.copy()
+
+    # Locate vswhere.exe (ships with every VS / Build Tools installer)
+    prog86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    vswhere = Path(prog86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    if not vswhere.exists():
+        print("[setup] WARNING: vswhere.exe not found — MSVC Build Tools may be missing.")
+        return os.environ.copy()
+
+    # Ask vswhere for the latest install that has the C++ x64 tools
+    try:
+        install_path = subprocess.check_output(
+            [
+                str(vswhere), "-latest", "-products", "*",
+                "-requires", "Microsoft.VisualCpp.Tools.HostX64.TargetX64",
+                "-property", "installationPath",
+            ],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception as exc:
+        print(f"[setup] WARNING: vswhere query failed: {exc}")
+        return os.environ.copy()
+
+    if not install_path:
+        print("[setup] WARNING: No Visual Studio installation with C++ tools found.")
+        return os.environ.copy()
+
+    vcvarsall = Path(install_path) / "VC" / "Auxiliary" / "Build" / "vcvarsall.bat"
+    if not vcvarsall.exists():
+        print(f"[setup] WARNING: vcvarsall.bat not found at {vcvarsall}")
+        return os.environ.copy()
+
+    # Run vcvarsall and capture the resulting environment
+    try:
+        out = subprocess.check_output(
+            f'"{vcvarsall}" {arch} && set',
+            shell=True,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        print(f"[setup] WARNING: vcvarsall.bat failed: {exc}")
+        return os.environ.copy()
+
+    env = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            env[k] = v
+    print(f"[setup] MSVC activated via {vcvarsall} ({arch})")
+    return env
 
 
 def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
@@ -143,26 +285,45 @@ def compile_texgen(venv: Path, ext_dir: Path, gpu_sm: int) -> None:
         return
 
     arch      = _sm_to_arch(gpu_sm) if gpu_sm > 0 else "8.6"
-    build_env = {**os.environ, "TORCH_CUDA_ARCH_LIST": arch}
+    # Activate MSVC so cl.exe is available on Windows
+    build_env = {**_msvc_env(), "TORCH_CUDA_ARCH_LIST": arch}
     if is_win:
         build_env["DISTUTILS_USE_SDK"] = "1"
 
+    # Metadata for prebuilt wheel selection
+    pyver      = subprocess.check_output(
+        [str(exe), "-c", "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')"],
+        text=True,
+    ).strip()
+    plat       = _wheel_platform()
+    torch_ver  = subprocess.check_output(
+        [str(exe), "-c", "import torch; print(torch.__version__.split('+')[0])"],
+        text=True, stderr=subprocess.DEVNULL,
+    ).strip() if _module_importable(venv, "torch") else ""
+    tlabel     = _torch_label(torch_ver, cuda_version) if torch_ver and cuda_version else ""
+
     # (ext_dir_name, importable_module_name)
-    # differentiable_renderer compiles `mesh_processor` (pybind11)
-    # custom_rasterizer compiles `custom_rasterizer` package + CUDA kernel
+    # differentiable_renderer -> mesh_processor (pybind11, no CUDA)
+    # custom_rasterizer       -> custom_rasterizer (CUDA + PyTorch)
     extensions = [
         ("differentiable_renderer", "mesh_processor"),
         ("custom_rasterizer",       "custom_rasterizer"),
     ]
     for ext_name, module_name in extensions:
         ext_path = texgen / ext_name
-        if not ext_path.exists():
-            print(f"[setup] {ext_name} not found at {ext_path}, skipping.")
+
+        # Skip if already importable
+        if _module_importable(venv, module_name):
+            print(f"[setup] {module_name} already installed, skipping.")
             continue
 
-        # Skip if the compiled module is already importable in the venv
-        if _module_importable(venv, module_name):
-            print(f"[setup] {module_name} already compiled, skipping.")
+        # 1. Try prebuilt wheel first (fast, no compiler needed)
+        if _try_install_prebuilt(venv, module_name, pyver, plat, tlabel):
+            continue
+
+        # 2. Fall back to source compilation
+        if not ext_path.exists():
+            print(f"[setup] {ext_name} source not found at {ext_path}, skipping.")
             continue
 
         print(f"[setup] Compiling {ext_name} for sm_{gpu_sm} (arch={arch}) ...")

@@ -319,7 +319,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
         """
         Compile custom_rasterizer (CUDA) and differentiable_renderer (pybind11).
         Runs inside the current venv (sys.executable).
+        Activates MSVC automatically on Windows via vcvarsall.bat.
         """
+        import shutil
         import subprocess
 
         exe = sys.executable
@@ -345,6 +347,9 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
             print("[Hunyuan3DPaintGenerator] Installing pybind11...")
             subprocess.run([exe, "-m", "pip", "install", "pybind11>=2.6.0"], check=True)
 
+        # Build environment: activate MSVC on Windows so cl.exe is available
+        build_env = self._msvc_env()
+
         # differentiable_renderer first (pure C++, no CUDA dependency)
         # custom_rasterizer second (needs CUDA / nvcc)
         for ext_name, module_name in (
@@ -363,16 +368,73 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
             except (ImportError, OSError):
                 pass
             print(f"[Hunyuan3DPaintGenerator] Compiling {ext_name} -> {module_name}...")
-            try:
-                subprocess.run(
-                    [exe, "setup.py", "install"],
-                    cwd=str(ext_path),
-                    check=True,
-                )
-                print(f"[Hunyuan3DPaintGenerator] {ext_name} compiled.")
-            except subprocess.CalledProcessError as exc:
+            result = subprocess.run(
+                [exe, "setup.py", "install"],
+                cwd=str(ext_path),
+                env=build_env,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
                 raise RuntimeError(
-                    f"Compilation of {ext_name} failed (exit {exc.returncode}).\n"
+                    f"Compilation of {ext_name} failed (exit {result.returncode}).\n"
                     f"Ensure CUDA Toolkit and MSVC Build Tools are installed.\n"
-                    f"Source: {ext_path}"
-                ) from exc
+                    f"Source: {ext_path}\n"
+                    f"--- stderr ---\n{result.stderr}"
+                )
+            print(f"[Hunyuan3DPaintGenerator] {ext_name} compiled.")
+
+    @staticmethod
+    def _msvc_env(arch: str = "x64") -> dict:
+        """
+        Return env dict with MSVC activated via vcvarsall.bat (Windows only).
+        Falls back to os.environ if MSVC is already active or not found.
+        """
+        import shutil
+        import subprocess
+
+        if sys.platform != "win32":
+            return os.environ.copy()
+
+        if shutil.which("cl.exe"):
+            return os.environ.copy()
+
+        prog86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        vswhere = Path(prog86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+        if not vswhere.exists():
+            print("[Hunyuan3DPaintGenerator] WARNING: vswhere.exe not found.")
+            return os.environ.copy()
+
+        try:
+            install_path = subprocess.check_output(
+                [str(vswhere), "-latest", "-products", "*",
+                 "-requires", "Microsoft.VisualCpp.Tools.HostX64.TargetX64",
+                 "-property", "installationPath"],
+                text=True, stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            return os.environ.copy()
+
+        if not install_path:
+            print("[Hunyuan3DPaintGenerator] WARNING: No VS installation with C++ tools found.")
+            return os.environ.copy()
+
+        vcvarsall = Path(install_path) / "VC" / "Auxiliary" / "Build" / "vcvarsall.bat"
+        if not vcvarsall.exists():
+            return os.environ.copy()
+
+        try:
+            out = subprocess.check_output(
+                f'"{vcvarsall}" {arch} && set',
+                shell=True, text=True, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return os.environ.copy()
+
+        env = {}
+        for line in out.splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                env[k] = v
+        print(f"[Hunyuan3DPaintGenerator] MSVC activated ({arch})")
+        return env
