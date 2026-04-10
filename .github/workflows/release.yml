@@ -1,24 +1,173 @@
-name: Release
+name: Build Wheels & Release
 
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    name: Create GitHub Release
+  build-mesh-processor:
+    name: mesh_processor | ${{ matrix.os }} | py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel ninja
+          pip install "pybind11>=2.6.0"
+
+      - name: Extract differentiable_renderer source
+        shell: python
+        run: |
+          import urllib.request, zipfile, io, pathlib
+          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/differentiable_renderer/"
+          STRIP  = "Hunyuan3D-2-main/"
+          print(f"Downloading {URL} ...")
+          with urllib.request.urlopen(URL, timeout=300) as r:
+              data = r.read()
+          print("Extracting differentiable_renderer/ ...")
+          with zipfile.ZipFile(io.BytesIO(data)) as zf:
+              for m in zf.namelist():
+                  if not m.startswith(PREFIX):
+                      continue
+                  rel = pathlib.Path(m[len(STRIP):])
+                  if m.endswith("/"):
+                      rel.mkdir(parents=True, exist_ok=True)
+                  else:
+                      rel.parent.mkdir(parents=True, exist_ok=True)
+                      rel.write_bytes(zf.read(m))
+          print("Done.")
+
+      - name: Build wheel
+        run: |
+          mkdir -p dist
+          pip wheel hy3dgen/texgen/differentiable_renderer --no-build-isolation --no-cache-dir -w dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesh-processor-${{ matrix.os }}-py${{ matrix.python }}
+          path: dist/*.whl
+
+  build-custom-rasterizer:
+    name: custom_rasterizer | ${{ matrix.os }} | py${{ matrix.python }} | ${{ matrix.torch.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ['3.10', '3.11', '3.12']
+        torch:
+          - label: torch260-cuda124
+            pkg:   "torch==2.6.0 torchvision==0.21.0"
+            index: "https://download.pytorch.org/whl/cu124"
+            cuda:  "12.4.1"
+          - label: torch270-cuda128
+            pkg:   "torch==2.7.0 torchvision==0.22.0"
+            index: "https://download.pytorch.org/whl/cu128"
+            cuda:  "12.8.0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install CUDA ${{ matrix.torch.cuda }}
+        uses: Jimver/cuda-toolkit@v0.2.23
+        with:
+          cuda: ${{ matrix.torch.cuda }}
+          method: network
+          sub-packages: '["nvcc", "cudart", "cudart_dev"]'
+          linux-local-args: '["--toolkit"]'
+
+      - name: Install PyTorch
+        run: pip install ${{ matrix.torch.pkg }} --index-url ${{ matrix.torch.index }}
+
+      - name: Install build dependencies
+        run: pip install --upgrade pip setuptools wheel ninja
+
+      - name: Extract custom_rasterizer source
+        shell: python
+        run: |
+          import urllib.request, zipfile, io, pathlib
+          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/custom_rasterizer/"
+          STRIP  = "Hunyuan3D-2-main/"
+          print(f"Downloading {URL} ...")
+          with urllib.request.urlopen(URL, timeout=300) as r:
+              data = r.read()
+          print("Extracting custom_rasterizer/ ...")
+          with zipfile.ZipFile(io.BytesIO(data)) as zf:
+              for m in zf.namelist():
+                  if not m.startswith(PREFIX):
+                      continue
+                  rel = pathlib.Path(m[len(STRIP):])
+                  if m.endswith("/"):
+                      rel.mkdir(parents=True, exist_ok=True)
+                  else:
+                      rel.parent.mkdir(parents=True, exist_ok=True)
+                      rel.write_bytes(zf.read(m))
+          print("Done.")
+
+      - name: Build wheel
+        run: |
+          mkdir -p raw-dist
+          pip wheel hy3dgen/texgen/custom_rasterizer --no-cache-dir -w raw-dist/
+
+      - name: Tag wheel with torch+cuda version
+        shell: python
+        run: |
+          import pathlib, shutil, re
+          label = "${{ matrix.torch.label }}"
+          src   = pathlib.Path("raw-dist")
+          dst   = pathlib.Path("dist")
+          dst.mkdir(exist_ok=True)
+          for whl in src.glob("*.whl"):
+              tagged = re.sub(
+                  r'^(custom_rasterizer-[^-]+)(-)',
+                  lambda m: f"{m.group(1)}.0+{label}{m.group(2)}",
+                  whl.name, count=1,
+              )
+              shutil.copy(whl, dst / tagged)
+              print(f"  {whl.name} -> {tagged}")
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-rasterizer-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.torch.label }}
+          path: dist/*.whl
+
+  create-release:
+    name: Create Release with Wheels & Extension
+    needs: [build-mesh-processor, build-custom-rasterizer]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate manifest
-        run: python -c "import json, sys; json.load(open('manifest.json')); print('manifest.json OK')"
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: wheels_tmp
+          merge-multiple: true
 
       - name: Extract version from tag
         id: version
@@ -36,24 +185,63 @@ jobs:
             --exclude "__pycache__/*" \
             --exclude ".git/*"
 
+      - name: Organize wheels
+        run: |
+          mkdir -p final_assets
+          cp modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip final_assets/
+          cp wheels_tmp/*.whl final_assets/ 2>/dev/null || true
+          echo "=== Final assets ==="
+          ls -lh final_assets/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Hunyuan3D Paint ${{ github.ref_name }}"
           body: |
             ## Hunyuan3D Paint ${{ github.ref_name }}
-
             Apply PBR textures to existing meshes using Hunyuan3D-Paint (Tencent).
 
-            ### Installation
-            1. Download `modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip`
-            2. Import via **Modly → Extensions → Install from file**
-            3. Run `build_vendor.py` with the app's Python to populate `vendor/`
-            4. Compile C++ extensions (see README)
+            ### 📦 Assets
+            - **modly-hunyuan3d-paint-extension** : Extension Modly (Blender plugin)
+            - **mesh_processor** : Windows & Linux, Python 3.10–3.12
+            - **custom_rasterizer** : Windows & Linux, CUDA 12.4/12.8, Python 3.10–3.12
 
-            ### Changes
+            ### 📥 Installation rapide
+            pip install <wheel>.whl
+
+            ### 🪟 Windows — Build depuis les sources (si le wheel ne fonctionne pas)
+
+            **Prérequis :**
+            - [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) 12.4 ou 12.8 installé
+            - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) avec "Desktop development with C++"
+            - Python 3.10, 3.11 ou 3.12
+
+            # 1. Cloner le repo
+            git clone https://github.com/Lorchie/modly-hunyuan3d-paint-extension
+            cd modly-hunyuan3d-paint-extension
+
+            # 2. Installer PyTorch (choisir selon votre CUDA)
+            # CUDA 12.4 :
+            pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+            # CUDA 12.8 :
+            pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+
+            # 3. Dépendances de build
+            pip install ninja pybind11 setuptools wheel
+
+            # 4. Télécharger les sources Hunyuan3D-2
+            python build_vendor.py   # ou manuellement depuis le repo Tencent
+
+            # 5. Builder les wheels
+            pip wheel hy3dgen/texgen/differentiable_renderer --no-build-isolation -w dist/
+            pip wheel hy3dgen/texgen/custom_rasterizer -w dist/
+
+            # 6. Installer
+            pip install dist/*.whl
+```
+
+            ### 📝 Changes
             See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
-          files: |
-            modly-hunyuan3d-paint-extension-${{ steps.version.outputs.VERSION }}.zip
+          files: final_assets/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
