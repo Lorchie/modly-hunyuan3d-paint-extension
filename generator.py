@@ -27,7 +27,7 @@ from PIL import Image
 from services.generators.base import BaseGenerator, smooth_progress, GenerationCancelled
 
 _EXTENSION_DIR = Path(__file__).parent
-_GITHUB_ZIP    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
+_GITHUB_ZIP    = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
 
 
 class Hunyuan3DPaintGenerator(BaseGenerator):
@@ -256,8 +256,8 @@ class Hunyuan3DPaintGenerator(BaseGenerator):
             data = resp.read()
         print("[Hunyuan3DPaintGenerator] Extracting hy3dgen...")
 
-        prefix = "Hunyuan3D-2-main/hy3dgen/"
-        strip  = "Hunyuan3D-2-main/"
+        prefix = "Hunyuan3D-2GP-main/hy3dgen/"
+        strip  = "Hunyuan3D-2GP-main/"
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             for member in zf.namelist():
                 if not member.startswith(prefix):

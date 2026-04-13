@@ -34,7 +34,7 @@ import zipfile
 from pathlib import Path
 
 VENDOR      = Path(__file__).parent / "vendor"
-GITHUB_ZIP  = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
+GITHUB_ZIP  = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
 
 # Pure-Python packages to vendor (no compilation needed).
 # torch and torchvision are already provided by the host app - do NOT vendor them.
@@ -82,8 +82,8 @@ def vendor_hy3dgen(dest: Path) -> None:
         data = resp.read()
     print(f"  Downloaded {len(data) // 1024 // 1024} MB.")
 
-    prefix = "Hunyuan3D-2-main/hy3dgen/"
-    strip  = "Hunyuan3D-2-main/"
+    prefix = "Hunyuan3D-2GP-main/hy3dgen/"
+    strip  = "Hunyuan3D-2GP-main/"
 
     print("  Extracting hy3dgen/...")
     with zipfile.ZipFile(io.BytesIO(data)) as zf:

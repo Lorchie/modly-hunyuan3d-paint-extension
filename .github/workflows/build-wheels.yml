@@ -48,9 +48,9 @@ jobs:
         shell: python
         run: |
           import urllib.request, zipfile, io, pathlib
-          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
-          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/differentiable_renderer/"
-          STRIP  = "Hunyuan3D-2-main/"
+          URL    = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2GP-main/hy3dgen/texgen/differentiable_renderer/"
+          STRIP  = "Hunyuan3D-2GP-main/"
           print(f"Downloading {URL} ...")
           with urllib.request.urlopen(URL, timeout=300) as r:
               data = r.read()
@@ -141,9 +141,9 @@ jobs:
         shell: python
         run: |
           import urllib.request, zipfile, io, pathlib
-          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
-          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/custom_rasterizer/"
-          STRIP  = "Hunyuan3D-2-main/"
+          URL    = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2GP-main/hy3dgen/texgen/custom_rasterizer/"
+          STRIP  = "Hunyuan3D-2GP-main/"
           print(f"Downloading {URL} ...")
           with urllib.request.urlopen(URL, timeout=300) as r:
               data = r.read()
@@ -192,11 +192,61 @@ jobs:
           path: dist/*.whl
 
   # ---------------------------------------------------------------------------
-  # Job 3 — Collect, commit to wheels/, attach to release
+  # Job 3 — hy3dgen pure Python wheel (platform-independent, built once)
+  # ---------------------------------------------------------------------------
+  build-hy3dgen:
+    name: hy3dgen (pure Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build deps
+        run: pip install setuptools wheel
+
+      - name: Extract hy3dgen source
+        shell: python
+        run: |
+          import urllib.request, zipfile, io, pathlib
+          URL      = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
+          PREFIXES = [
+              "Hunyuan3D-2GP-main/hy3dgen/",
+              "Hunyuan3D-2GP-main/setup.py",
+          ]
+          STRIP    = "Hunyuan3D-2GP-main/"
+          print(f"Downloading {URL} ...")
+          with urllib.request.urlopen(URL, timeout=300) as r:
+              data = r.read()
+          with zipfile.ZipFile(io.BytesIO(data)) as zf:
+              for m in zf.namelist():
+                  if not any(m.startswith(p) for p in PREFIXES):
+                      continue
+                  rel = pathlib.Path(m[len(STRIP):])
+                  if m.endswith("/"):
+                      rel.mkdir(parents=True, exist_ok=True)
+                  else:
+                      rel.parent.mkdir(parents=True, exist_ok=True)
+                      rel.write_bytes(zf.read(m))
+          print("Extracted.")
+
+      - name: Build wheel
+        run: pip wheel . --no-deps -w dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hy3dgen
+          path: dist/*.whl
+
+  # ---------------------------------------------------------------------------
+  # Job 4 — Collect, commit to wheels/, attach to release
   # ---------------------------------------------------------------------------
   publish-wheels:
     name: Publish wheels
-    needs: [build-mesh-processor, build-custom-rasterizer]
+    needs: [build-mesh-processor, build-custom-rasterizer, build-hy3dgen]
     runs-on: ubuntu-latest
 
     steps:
@@ -228,6 +278,21 @@ jobs:
             git commit -m "ci: update prebuilt wheels [skip ci]"
             git push
           fi
+
+      - name: Bundle all wheels into a single downloadable zip
+        run: |
+          cd wheels
+          zip -r ../all-wheels.zip *.whl
+          cd ..
+          echo "=== Bundle ==="
+          ls -lh all-wheels.zip
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-wheels
+          path: all-wheels.zip
+          retention-days: 90
 
       - name: Attach wheels to GitHub Release
         if: github.event_name == 'release'

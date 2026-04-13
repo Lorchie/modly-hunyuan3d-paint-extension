@@ -21,7 +21,7 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-_GITHUB_ZIP   = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
+_GITHUB_ZIP   = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
 _REPO         = "Lorchie/modly-hunyuan3d-paint-extension"
 _RELEASES_URL = f"https://github.com/{_REPO}/releases/latest/download"
 _WHEELS_RAW   = f"https://raw.githubusercontent.com/{_REPO}/main/wheels"
@@ -112,6 +112,8 @@ def wheel_candidates(module: str, py_tag: str, plat: str,
             f"custom_rasterizer-0.1.0+{torch_label}-{py_tag}-{py_tag}-{plat}.whl",
             f"custom_rasterizer-0.1-{py_tag}-{py_tag}-{plat}.whl",
         ]
+    elif module == "hy3dgen":
+        names = ["hy3dgen-2.0.0-py3-none-any.whl"]
     else:
         return []
 
@@ -161,47 +163,57 @@ def install_wheel(venv: Path, module: str, candidates: list) -> bool:
 
 def install_hy3dgen(venv: Path, ext_dir: Path) -> None:
     """
-    Install hy3dgen Python source into the venv's site-packages.
-    Priority: ext_dir/vendor/hy3dgen > GitHub download.
+    Install hy3dgen Python package into the venv.
+    Priority: prebuilt wheel > vendor/ > GitHub source download.
     """
-    site_packages = subprocess.check_output(
-        [str(_exe(venv)), "-c",
-         "import site; print([p for p in site.getsitepackages() if 'site-packages' in p][0])"],
-        text=True,
-    ).strip()
-    dest = Path(site_packages) / "hy3dgen"
+    pip_exe = _pip(venv)
 
-    if dest.exists():
-        print("[setup] hy3dgen already in site-packages, skipping.")
+    # Check if already installed
+    result = subprocess.run(
+        [str(pip_exe), "show", "hy3dgen"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print("[setup] hy3dgen already installed, skipping.")
         return
 
+    # Try prebuilt wheel first
+    candidates = wheel_candidates("hy3dgen", "py3", "none-any", "", "")
+    print("[setup] Installing hy3dgen from prebuilt wheel ...")
+    if install_wheel(venv, "hy3dgen", candidates):
+        return
+
+    # Fallback: vendor/ directory
     vendor_src = ext_dir / "vendor" / "hy3dgen"
     if vendor_src.exists():
-        import shutil
-        print(f"[setup] Copying hy3dgen from vendor/ -> {dest}")
-        shutil.copytree(str(vendor_src), str(dest))
-        print("[setup] hy3dgen copied from vendor/.")
+        print(f"[setup] Installing hy3dgen from vendor/ ...")
+        subprocess.run([str(pip_exe), "install", str(vendor_src)], check=True)
         return
 
+    # Last resort: download source from GitHub and install
     print("[setup] Downloading hy3dgen source from GitHub...")
     with urllib.request.urlopen(_GITHUB_ZIP, timeout=300) as resp:
         data = resp.read()
 
-    prefix = "Hunyuan3D-2-main/hy3dgen/"
-    strip  = "Hunyuan3D-2-main/"
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        for member in zf.namelist():
-            if not member.startswith(prefix):
-                continue
-            rel    = member[len(strip):]
-            target = Path(site_packages) / rel
-            if member.endswith("/"):
-                target.mkdir(parents=True, exist_ok=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(zf.read(member))
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        prefix = "Hunyuan3D-2GP-main/hy3dgen/"
+        strip  = "Hunyuan3D-2GP-main/"
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for member in zf.namelist():
+                if not member.startswith(prefix) and member != f"{strip}setup.py":
+                    continue
+                rel    = member[len(strip):]
+                target = tmp / rel
+                if member.endswith("/"):
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(zf.read(member))
+        subprocess.run([str(pip_exe), "install", str(tmp)], check=True)
 
-    print(f"[setup] hy3dgen installed to {site_packages}.")
+    print("[setup] hy3dgen installed from source.")
 
 # ---------------------------------------------------------------------------
 # C++ extension wheel installer (zero compilation)
@@ -268,14 +280,22 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
         "scipy",
         "opencv-python-headless",
         "xatlas",
+        "pygltflib",
     )
 
-    # ── rembg ──────────────────────────────────────────────────────────────
-    print("[setup] Installing rembg ...")
-    if gpu_sm >= 70:
-        pip(venv, "install", "rembg[gpu]")
+    # ── rembg + onnxruntime ────────────────────────────────────────────────
+    # onnxruntime-gpu must match the CUDA version used by torch.
+    # cu128 requires onnxruntime-gpu >= 1.21 (first release with CUDA 12.x support).
+    # cu124 / cu118 work with onnxruntime-gpu >= 1.17.
+    print("[setup] Installing rembg + onnxruntime ...")
+    if gpu_sm >= 100:
+        ort_pkg = "onnxruntime-gpu>=1.21"
+    elif gpu_sm >= 70:
+        ort_pkg = "onnxruntime-gpu>=1.17"
     else:
-        pip(venv, "install", "rembg", "onnxruntime")
+        ort_pkg = "onnxruntime"
+
+    pip(venv, "install", "rembg", ort_pkg)
 
     # ── hy3dgen source ─────────────────────────────────────────────────────
     install_hy3dgen(venv, ext_dir)

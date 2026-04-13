@@ -34,9 +34,9 @@ jobs:
         shell: python
         run: |
           import urllib.request, zipfile, io, pathlib
-          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
-          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/differentiable_renderer/"
-          STRIP  = "Hunyuan3D-2-main/"
+          URL    = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2GP-main/hy3dgen/texgen/differentiable_renderer/"
+          STRIP  = "Hunyuan3D-2GP-main/"
           print(f"Downloading {URL} ...")
           with urllib.request.urlopen(URL, timeout=300) as r:
               data = r.read()
@@ -108,9 +108,9 @@ jobs:
         shell: python
         run: |
           import urllib.request, zipfile, io, pathlib
-          URL    = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
-          PREFIX = "Hunyuan3D-2-main/hy3dgen/texgen/custom_rasterizer/"
-          STRIP  = "Hunyuan3D-2-main/"
+          URL    = "https://github.com/deepbeepmeep/Hunyuan3D-2GP/archive/refs/heads/main.zip"
+          PREFIX = "Hunyuan3D-2GP-main/hy3dgen/texgen/custom_rasterizer/"
+          STRIP  = "Hunyuan3D-2GP-main/"
           print(f"Downloading {URL} ...")
           with urllib.request.urlopen(URL, timeout=300) as r:
               data = r.read()
@@ -207,13 +207,9 @@ jobs:
             - **custom_rasterizer** : Windows & Linux, CUDA 12.4/12.8, Python 3.10–3.12
 
             ### 📥 Installation rapide
-<<<<<<< HEAD
 ```bash
             pip install <wheel>.whl
 ```
-=======
-            pip install <wheel>.whl
->>>>>>> 7debfd4833abc82f2c8f0580a58eac92e1e7cf89
 
             ### 🪟 Windows — Build depuis les sources (si le wheel ne fonctionne pas)
 
@@ -222,10 +218,7 @@ jobs:
             - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) avec "Desktop development with C++"
             - Python 3.10, 3.11 ou 3.12
 
-<<<<<<< HEAD
 ```bash
-=======
->>>>>>> 7debfd4833abc82f2c8f0580a58eac92e1e7cf89
             # 1. Cloner le repo
             git clone https://github.com/Lorchie/modly-hunyuan3d-paint-extension
             cd modly-hunyuan3d-paint-extension
@@ -248,10 +241,7 @@ jobs:
 
             # 6. Installer
             pip install dist/*.whl
-<<<<<<< HEAD
 ```
-=======
->>>>>>> 7debfd4833abc82f2c8f0580a58eac92e1e7cf89
 
             ### 📝 Changes
             See [CHANGELOG](https://github.com/Lorchie/modly-hunyuan3d-paint-extension/commits/${{ github.ref_name }})
