@@ -98,7 +98,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        # ubuntu-22.04 is required: CUDA 11.8 packages are not available on Ubuntu 24.04 (noble).
+        # ubuntu-22.04 also supports CUDA 12.4 and 12.8, so we use it for all Linux CUDA builds.
+        os: [windows-latest, ubuntu-22.04]
         python: ['3.10', '3.11', '3.12']
         cuda:
           - label:     cu118
