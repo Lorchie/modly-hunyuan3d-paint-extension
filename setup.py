@@ -51,11 +51,11 @@ def resolve_cuda(gpu_sm: int) -> tuple:
             "https://download.pytorch.org/whl/cu124",
             ["torch==2.6.0", "torchvision==0.21.0"],
         )
-    # Legacy (SM < 70) or unknown
+    # SM < 70 (Pascal/Volta — GTX 10xx, Titan V): too old, CPU fallback.
     return (
-        "cu118", "2.5.1",
-        "https://download.pytorch.org/whl/cu118",
-        ["torch==2.5.1", "torchvision==0.20.1"],
+        "cpu", "2.6.0",
+        "https://download.pytorch.org/whl/cpu",
+        ["torch==2.6.0", "torchvision==0.21.0"],
     )
 
 # ---------------------------------------------------------------------------

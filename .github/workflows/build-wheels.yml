@@ -98,33 +98,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-22.04 is required: CUDA 11.8 packages are not available on Ubuntu 24.04 (noble).
-        # ubuntu-22.04 also supports CUDA 12.4 and 12.8, so we use it for all Linux CUDA builds.
         os: [windows-latest, ubuntu-22.04]
         python: ['3.10', '3.11', '3.12']
         cuda:
-          - label:       cu118
-            toolkit:     "11.8.0"
-            torch_pkg:   "torch==2.5.1 torchvision==0.20.1"
-            torch_idx:   "https://download.pytorch.org/whl/cu118"
-            torch_ver:   "2.5.1"
-            arch_list:   "6.0;6.1;7.0;7.5;8.0;8.6"
-            # CUDA 11.8 was released before MSVC 14.40+ existed — override the version check.
-            nvcc_flags:  "-allow-unsupported-compiler"
-          - label:       cu124
-            toolkit:     "12.4.1"
-            torch_pkg:   "torch==2.6.0 torchvision==0.21.0"
-            torch_idx:   "https://download.pytorch.org/whl/cu124"
-            torch_ver:   "2.6.0"
-            arch_list:   "7.0;7.5;8.0;8.6;9.0"
-            nvcc_flags:  ""
-          - label:       cu128
-            toolkit:     "12.8.0"
-            torch_pkg:   "torch==2.7.0 torchvision==0.22.0"
-            torch_idx:   "https://download.pytorch.org/whl/cu128"
-            torch_ver:   "2.7.0"
-            arch_list:   "7.0;7.5;8.0;8.6;9.0;10.0"
-            nvcc_flags:  ""
+          - label:      cu124
+            toolkit:    "12.4.1"
+            torch_pkg:  "torch==2.6.0 torchvision==0.21.0"
+            torch_idx:  "https://download.pytorch.org/whl/cu124"
+            torch_ver:  "2.6.0"
+            arch_list:  "7.0;7.5;8.0;8.6;9.0"
+            nvcc_flags: ""
+          - label:      cu128
+            toolkit:    "12.8.0"
+            torch_pkg:  "torch==2.7.0 torchvision==0.22.0"
+            torch_idx:  "https://download.pytorch.org/whl/cu128"
+            torch_ver:  "2.7.0"
+            arch_list:  "7.0;7.5;8.0;8.6;9.0;10.0"
+            nvcc_flags: ""
 
     steps:
       - uses: actions/checkout@v4
