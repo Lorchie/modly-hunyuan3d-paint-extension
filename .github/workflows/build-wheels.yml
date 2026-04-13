@@ -129,6 +129,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Set up MSVC (Windows only)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Install CUDA ${{ matrix.cuda.toolkit }}
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
